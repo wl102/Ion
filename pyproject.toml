@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "Ion"
+version = "0.1.0"
+description = "网络安全渗透测试Agent - 动态规划攻击路径图谱"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "dotenv>=0.9.9",
+    "openai>=2.31.0",
+    "pydantic>=2.12.5",
+    "requests>=2.32.0",
+    "pyyaml>=6.0.2",
+    "duckduckgo-search>=8.1.1",
+]
+
+[project.optional-dependencies]
+pentest = [
+    "duckduckgo-search>=7.0.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "build>=1.0.0",
+]
+
+[project.scripts]
+ion = "Ion.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/Ion"]
