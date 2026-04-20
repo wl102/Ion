@@ -1,0 +1,228 @@
+[
+    {
+        "type": "function",
+        "function": {
+            "name": "bash",
+            "description": "Run a shell command in the current workspace with safety checks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "bash command to execute"
+                    }
+                },
+                "required": [
+                    "command"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "python_exec",
+            "description": "Execute Python code in a restricted environment and return stdout.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "Python code to execute"
+                    }
+                },
+                "required": [
+                    "code"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "http_request",
+            "description": "Make an HTTP request.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Target URL"
+                    },
+                    "method": {
+                        "type": "string",
+                        "description": "HTTP method (GET or POST)"
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Request body for POST"
+                    }
+                },
+                "required": [
+                    "url"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the web using DuckDuckGo.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query"
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_task",
+            "description": "Create a new task in the attack graph.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Task name"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "What this task does"
+                    },
+                    "depend_on": {
+                        "type": "array",
+                        "description": "List of task IDs this task depends on"
+                    }
+                },
+                "required": [
+                    "name",
+                    "description"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_task",
+            "description": "Update a task's status and optionally its result.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "The task ID"
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "New status (pending, running, failed, killed, completed)"
+                    },
+                    "result": {
+                        "type": "string",
+                        "description": "Optional result text"
+                    }
+                },
+                "required": [
+                    "task_id",
+                    "status"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_task",
+            "description": "Delete a task from the attack graph.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "The task ID to delete"
+                    }
+                },
+                "required": [
+                    "task_id"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_ready_tasks",
+            "description": "List ready tasks in the attack graph.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_tasks",
+            "description": "List all tasks in the attack graph.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_attack_graph",
+            "description": "Get the current attack graph as nodes and edges.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "activate_skills",
+            "description": "Activate one or more skills by loading their full instructions into context.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_names": {
+                        "type": "array",
+                        "description": "List of skill names to activate"
+                    }
+                },
+                "required": [
+                    "skill_names"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_skills",
+            "description": "List all available skills with name and description.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    }
+]

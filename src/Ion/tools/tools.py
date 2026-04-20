@@ -1,10 +1,10 @@
-import inspect
 import io
 import json
 import os
 import subprocess
 import sys
-from typing import get_args, get_origin, get_type_hints, Optional, Union
+from typing import Optional
+from pathlib import Path
 
 import requests
 
@@ -12,61 +12,9 @@ import requests
 tool_map = {}
 
 
-def _json_type_from_annotation(annotation) -> str:
-    origin = get_origin(annotation)
-    if origin is Union:
-        non_none_args = [arg for arg in get_args(annotation) if arg is not type(None)]
-        if len(non_none_args) == 1:
-            return _json_type_from_annotation(non_none_args[0])
-        return "string"
-    if origin is list or annotation is list:
-        return "array"
-    if origin is dict or annotation is dict:
-        return "object"
-    if annotation is int:
-        return "integer"
-    if annotation is bool:
-        return "boolean"
-    return "string"
-
-
 def tool(name):
     def decorator(func):
         tool_map[name] = func
-        func._tool_name = name
-
-        sig = inspect.signature(func)
-        hints = get_type_hints(func)
-        properties = {}
-        required = []
-        for param_name, param in sig.parameters.items():
-            ptype = hints.get(param_name, str)
-            json_type = _json_type_from_annotation(ptype)
-
-            desc = param_name.replace("_", " ")
-            # 优先使用函数 docstring 中的参数描述（简化处理）
-            if func.__doc__ and f"{param_name}:" in func.__doc__:
-                for line in func.__doc__.split("\n"):
-                    if line.strip().startswith(f"{param_name}:"):
-                        desc = line.split(":", 1)[1].strip()
-                        break
-
-            properties[param_name] = {"type": json_type, "description": desc}
-            if param.default == inspect.Parameter.empty:
-                required.append(param_name)
-
-        func._tool_schema = {
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": (func.__doc__ or "").strip(),
-                "parameters": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required,
-                },
-            },
-        }
         return func
 
     return decorator
@@ -77,13 +25,11 @@ def dispatch(tool_name, **kw):
     return func(**kw)
 
 
-def get_tools_schema() -> list[dict]:
-    return [
-        func._tool_schema for func in tool_map.values() if hasattr(func, "_tool_schema")
-    ]
-
-
-# --- 基础工具 ---
+def get_tools_schema():
+    builtin_tools_schema_path = Path(__file__).parent / "schema.json"
+    with open(builtin_tools_schema_path, "r", encoding="utf-8") as f:
+        json_str = f.read()
+        return json.loads(json_str)
 
 
 @tool("bash")
