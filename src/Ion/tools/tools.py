@@ -82,6 +82,8 @@ def bash_exec(command: str) -> dict:
     no_permission = ["rm -rf /", "shutdown", "reboot", "> /dev/", "mkfs", "dd if="]
     if any(item in command for item in no_permission):
         return {"success": False, "output": "Error: Dangerous command blocked"}
+    timeout_str = os.getenv("BASH_COMMAND_TIMEOUT_SECONDS")
+    timeout = float(timeout_str) if timeout_str else 120
     try:
         output = subprocess.run(
             command,
@@ -89,10 +91,10 @@ def bash_exec(command: str) -> dict:
             cwd=os.getcwd(),
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        return {"success": False, "output": "Error: Timeout: 120s"}
+        return {"success": False, "output": f"Error: Timeout: {timeout}s"}
     except Exception as e:
         return {"success": False, "output": f"Error: {e}"}
     result = output.stdout + output.stderr
