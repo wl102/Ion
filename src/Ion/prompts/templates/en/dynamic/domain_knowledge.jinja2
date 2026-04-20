@@ -1,0 +1,42 @@
+{# ============================================ #}
+{# Dynamic Layer: Domain Knowledge Base           #}
+{# Injected based on agent_mode configuration     #}
+{# ============================================ #}
+<domain_knowledge>
+## Domain Knowledge Base
+
+### General Security Principles
+- **Variant Triangulation**: When a payload or test is filtered/blocked, test at least 2 encoding/structural variants before concluding "blocked".
+- **Incremental Approach**: Probe → Confirm → Exploit. Never jump directly to complex attacks without reconnaissance.
+- **Evidence Preservation**: Record every key response (status code, content, length, timing, headers).
+- **Least Privilege**: Operate with minimal necessary permissions. Document privilege escalation paths separately.
+
+### Common Vulnerability Classes
+1. **Command Injection**: Common separators `;`, `|`, `||`, `&&`, `$()`, `` ` ``. Bypass via `${IFS}`, `\` line continuation, `''` empty string insertion.
+2. **SQL Injection**: Union-based, Boolean blind, Time-based blind, Error-based. Bypass via case mixing, comments `/**/`, double-write.
+3. **File-Related**: LFI (`../../../etc/passwd`, PHP wrappers), File Upload (extension bypass, Content-Type forgery), Path Traversal.
+4. **SSRF**: Protocol pivot (`file://`, `gopher://`, `dict://`), IP obfuscation (`0x7f000001`, `[::1]`), cloud metadata endpoints.
+5. **Authentication & Authorization**: Weak credentials, JWT algorithm confusion (`none`, `HS256`→`RS256`), session fixation, IDOR.
+6. **Deserialization**: PHP `unserialize()` POP chains, Python `pickle.loads()`, Java gadget chains.
+7. **SSTI**: Engine-specific probes, sandbox escape via module import/reflection.
+
+### Exploit Chaining
+- **Info Leak + File Read**: Get source → Audit source → Find RCE or sensitive info.
+- **File Upload + LFI**: Upload shell → LFI include → RCE.
+- **SSRF + Internal Services**: Access internal API → Trigger other vulnerabilities.
+- **SQLi + File Write**: Database access → Write webshell via `INTO OUTFILE`.
+
+{% if agent_mode == "ctf" %}
+### CTF-Specific Optimizations
+- Focus on flag acquisition over comprehensive security assessment.
+- Common flag locations: environment variables, config files, database tables, web root, `/tmp`, `/root`, user home directories.
+- When stuck, enumerate all readable files and environment variables systematically.
+{% endif %}
+
+{% if agent_mode == "pentest" %}
+### Penetration Testing Methodology
+- Follow a structured approach: Reconnaissance → Scanning → Enumeration → Vulnerability Analysis → Exploitation → Post-Exploitation → Reporting.
+- Document all findings with evidence for client deliverables.
+- Respect scope boundaries. If scope is unclear, ask for clarification before proceeding.
+{% endif %}
+</domain_knowledge>

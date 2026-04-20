@@ -1,19 +1,20 @@
 import os
+from pathlib import Path
+from typing import Any, Optional
 
-from openai import OpenAI
 from dotenv import load_dotenv
-from typing import Optional
+from openai import OpenAI
 
 from Ion.ion import LoopState, run_agent_loop
 from Ion.observability import ObservabilityLogger
+from Ion.prompts import PromptBuilder
 from Ion.skills import SkillRegistry
 from Ion.tasks import TaskManager
 from Ion.tools.tools import get_tools_schema, register_skill_tools, register_task_tools
 
-
 load_dotenv()
 
-
+# Fallback system prompt used when the user opts out of layered prompts.
 DEFAULT_SYSTEM_PROMPT = (
     "You are Ion, a cybersecurity penetration testing agent. "
     "You can plan attack paths using tasks, run pentest tools via skills, "
@@ -40,6 +41,11 @@ class PentestAgent:
         task_manager: Optional[TaskManager] = None,
         skill_registry: Optional[SkillRegistry] = None,
         logger: Optional[ObservabilityLogger] = None,
+        # ---- Layered prompt configuration ----
+        use_layered_prompts: bool = True,
+        agent_mode: str = "default",
+        template_dir: Optional[str | Path] = None,
+        dynamic_config: Optional[dict[str, Any]] = None,
     ):
         self.model_id = model_id or os.getenv("MODEL_ID", "")
         self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
@@ -66,22 +72,91 @@ class PentestAgent:
         register_skill_tools(self.skill_registry)
 
         self.tools = get_tools_schema()
+        self.use_layered_prompts = use_layered_prompts
+        self.agent_mode = agent_mode
 
-        # 构建系统提示（包含 skill catalog）
-        base_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
-        catalog = self.skill_registry.get_catalog_xml()
-        if catalog:
-            self.system_prompt = f"{base_prompt}\n\n{SKILL_INSTRUCTIONS}\n\n{catalog}"
+        # ---- Build prompt builder (Layer 1 + Layer 2) ----
+        if self.use_layered_prompts:
+            dyn_cfg = {"agent_mode": self.agent_mode, **(dynamic_config or {})}
+            self._prompt_builder = PromptBuilder(
+                template_dir=template_dir, dynamic_config=dyn_cfg
+            )
+            self._fallback_prompt = None
         else:
-            self.system_prompt = base_prompt
+            # Legacy mode: hard-coded system prompt
+            base_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
+            catalog = self.skill_registry.get_catalog_xml()
+            if catalog:
+                self._fallback_prompt = (
+                    f"{base_prompt}\n\n{SKILL_INSTRUCTIONS}\n\n{catalog}"
+                )
+            else:
+                self._fallback_prompt = base_prompt
+            self._prompt_builder = None
+
+    # ------------------------------------------------------------------ #
+    #  Prompt assembly helpers                                           #
+    # ------------------------------------------------------------------ #
+
+    def _build_runtime_context(
+        self, user_goal: str, messages: Optional[list[dict]] = None
+    ) -> dict[str, Any]:
+        """Assemble Layer 3 (runtime) context from current agent state."""
+        ctx = PromptBuilder.build_full_runtime_context(
+            user_goal=user_goal,
+            task_manager=self.task_manager,
+            skill_registry=self.skill_registry,
+            tools_schema=self.tools,
+            messages=messages,
+        )
+        # Inject active skills content if any were activated during the session.
+        # SkillRegistry currently does not track active state; we surface catalog instead.
+        return ctx
+
+    def _build_system_prompt(
+        self, user_goal: str, messages: Optional[list[dict]] = None
+    ) -> str:
+        """Build the complete system prompt from all three layers."""
+        if not self.use_layered_prompts or self._prompt_builder is None:
+            return self._fallback_prompt or DEFAULT_SYSTEM_PROMPT
+
+        runtime_ctx = self._build_runtime_context(user_goal, messages)
+        return self._prompt_builder.build_system_prompt(runtime_ctx)
+
+    # ------------------------------------------------------------------ #
+    #  Main execution                                                    #
+    # ------------------------------------------------------------------ #
 
     def run(self, query: str) -> str:
+        # Initial system prompt with runtime context (Layer 3 injected at start)
+        system_prompt = self._build_system_prompt(user_goal=query)
+
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": query},
         ]
         state = LoopState(messages=messages)
-        run_agent_loop(self.client, self.model_id, state, self.tools, self.logger)
+
+        # Callback to refresh the system prompt before each turn.
+        # This allows Layer 3 runtime context (task graph, execution history)
+        # to stay up-to-date as the agent loop progresses.
+        def _on_before_turn(st: LoopState):
+            if not self.use_layered_prompts:
+                return
+            new_prompt = self._build_system_prompt(
+                user_goal=query, messages=st.messages
+            )
+            if st.messages and st.messages[0].get("role") == "system":
+                st.messages[0]["content"] = new_prompt
+
+        run_agent_loop(
+            self.client,
+            self.model_id,
+            state,
+            self.tools,
+            self.logger,
+            on_before_turn=_on_before_turn,
+        )
 
         if self.logger:
             self.logger.log_conversation(state.messages)

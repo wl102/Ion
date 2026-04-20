@@ -71,9 +71,24 @@ def run_one_turn(
 
 
 def run_agent_loop(
-    client, model_id: str, state: LoopState, tools: list[dict], logger=None
+    client,
+    model_id: str,
+    state: LoopState,
+    tools: list[dict],
+    logger=None,
+    on_before_turn=None,
 ):
+    """
+    Run the agent loop until a non-tool-calls finish reason is reached.
+
+    Args:
+        on_before_turn: Optional callback(state) invoked before each turn.
+                        Can be used to refresh the system prompt with
+                        updated runtime context (e.g., task graph state).
+    """
     while True:
+        if on_before_turn is not None:
+            on_before_turn(state)
         run_one_turn(client, model_id, state, tools, logger)
         if state.finish_reason != "tool_calls":
             return

@@ -2,19 +2,40 @@ import argparse
 import sys
 
 from Ion.agent import PentestAgent
-from Ion.tasks import TaskManager
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Ion - Cybersecurity Penetration Testing Agent")
+    parser = argparse.ArgumentParser(
+        description="Ion - Cybersecurity Penetration Testing Agent"
+    )
     parser.add_argument("query", nargs="?", help="The task or query for the agent")
-    parser.add_argument("--task-file", help="Load a predefined task graph from JSON file")
+    parser.add_argument(
+        "--task-file", help="Load a predefined task graph from JSON file"
+    )
     parser.add_argument("--log-dir", help="Directory for observability logs")
     parser.add_argument("--model", help="Override MODEL_ID")
     parser.add_argument("--base-url", help="Override OPENAI_BASE_URL")
     parser.add_argument("--api-key", help="Override OPENAI_API_KEY")
-    parser.add_argument("--system-prompt", help="Custom system prompt")
-    parser.add_argument("-i", "--interactive", action="store_true", help="Interactive mode")
+    parser.add_argument(
+        "--system-prompt", help="Custom system prompt (legacy mode only)"
+    )
+    parser.add_argument(
+        "--agent-mode",
+        default="default",
+        choices=["default", "ctf", "pentest", "aggressive", "stealthy"],
+        help="Dynamic prompt mode for Layer 2 templates (default: default)",
+    )
+    parser.add_argument(
+        "--no-layered-prompts",
+        action="store_true",
+        help="Disable layered prompts and use the legacy hard-coded system prompt",
+    )
+    parser.add_argument(
+        "--template-dir", help="Custom Jinja2 template directory for layered prompts"
+    )
+    parser.add_argument(
+        "-i", "--interactive", action="store_true", help="Interactive mode"
+    )
 
     args = parser.parse_args()
 
@@ -33,7 +54,14 @@ def main():
         kwargs["system_prompt"] = args.system_prompt
     if args.log_dir:
         from Ion.observability import ObservabilityLogger
+
         kwargs["logger"] = ObservabilityLogger(log_dir=args.log_dir)
+
+    # Layered prompt configuration
+    kwargs["use_layered_prompts"] = not args.no_layered_prompts
+    kwargs["agent_mode"] = args.agent_mode
+    if args.template_dir:
+        kwargs["template_dir"] = args.template_dir
 
     agent = PentestAgent(**kwargs)
 

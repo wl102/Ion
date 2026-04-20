@@ -219,6 +219,20 @@ def register_task_tools(task_manager):
             "output": f"Task {task_id} deleted" if ok else f"Task {task_id} not found",
         }
 
+    @tool("get_ready_tasks")
+    def get_ready_tasks() -> dict:
+        """List ready tasks in the attack graph"""
+        tasks = task_manager.get_ready_tasks()
+        if not tasks:
+            return {"success": True, "output": "No tasks ready yet."}
+        lines = []
+        for t in tasks:
+            deps = ", ".join(t.depend_on) if t.depend_on else "none"
+            lines.append(
+                f"{t.id}: [{t.status.value}] {t.name} {t.description} (deps: {deps})"
+            )
+        return {"success": True, "output": "\n".join(lines)}
+
     @tool("list_tasks")
     def list_tasks() -> dict:
         """List all tasks in the attack graph."""

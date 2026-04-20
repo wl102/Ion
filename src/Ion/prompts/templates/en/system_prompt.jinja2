@@ -1,0 +1,46 @@
+{# ============================================ #}
+{# Ion Agent - Layered System Prompt Template     #}
+{#                                                #}
+{# Layer 1: Static Prompts                        #}
+{#   - persona, primary_directive,                #}
+{#     core_responsibilities, output_format       #}
+{#   Defined in templates/en/static/              #}
+{#   Change only by editing template files        #}
+{#                                                #}
+{# Layer 2: Dynamic Prompts                       #}
+{#   - domain_knowledge, execution_principles,    #}
+{#     tool_guidelines                            #}
+{#   Defined in templates/en/dynamic/             #}
+{#   Injected based on agent_mode config          #}
+{#                                                #}
+{# Layer 3: Runtime Injected Prompts              #}
+{#   - user_goal, task_graph, skills, tools,      #}
+{#     execution_history, custom_context          #}
+{#   Injected at runtime via PromptBuilder        #}
+{# ============================================ #}
+
+{# ---- Layer 1: Static Prompts ---- #}
+{% include 'static/persona.jinja2' %}
+
+{% include 'static/primary_directive.jinja2' %}
+
+{% include 'static/core_responsibilities.jinja2' %}
+
+{# ---- Layer 2: Dynamic Prompts ---- #}
+{% if include_domain_knowledge %}
+{% include 'dynamic/domain_knowledge.jinja2' %}
+{% endif %}
+
+{% if include_execution_principles %}
+{% include 'dynamic/execution_principles.jinja2' %}
+{% endif %}
+
+{% if include_tool_guidelines %}
+{% include 'dynamic/tool_guidelines.jinja2' %}
+{% endif %}
+
+{# ---- Layer 3: Runtime Injected Prompts ---- #}
+{% include 'runtime/context_input.jinja2' %}
+
+{# ---- Static Output Format ---- #}
+{% include 'static/output_format.jinja2' %}

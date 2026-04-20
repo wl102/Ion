@@ -1,0 +1,57 @@
+{# ============================================ #}
+{# Runtime Layer: Dynamic Context Injection       #}
+{# All variables are populated at runtime         #}
+{# ============================================ #}
+<context_input>
+## Runtime Context
+
+{% if user_goal %}
+### User Objective
+**{{ user_goal }}**
+{% endif %}
+
+{% if task_graph_summary %}
+### Task Graph State
+{{ task_graph_summary }}
+{% endif %}
+
+{% if ready_tasks %}
+### Ready Tasks (Dependencies Satisfied)
+{{ ready_tasks }}
+{% endif %}
+
+{% if active_skills %}
+### Active Skills
+{{ active_skills }}
+{% endif %}
+
+{% if available_skills %}
+### Available Skills
+{{ available_skills }}
+{% endif %}
+
+{% if tools_section %}
+### Available Tools
+{{ tools_section }}
+{% endif %}
+
+{% if execution_history %}
+### Recent Execution History
+{{ execution_history }}
+{% endif %}
+
+{% if failure_patterns %}
+### Failure Patterns & Anti-Patterns
+{{ failure_patterns }}
+{% endif %}
+
+{% if key_facts %}
+### Key Facts (High-Confidence Intelligence)
+{{ key_facts }}
+{% endif %}
+
+{% if custom_context %}
+### Additional Context
+{{ custom_context }}
+{% endif %}
+</context_input>
