@@ -1,8 +1,9 @@
-from Ion import PentestAgent
+from Ion import PentestAgent, ObservabilityLogger
 
 
 def main():
-    agent = PentestAgent()
+    logger = ObservabilityLogger("./logs")
+    agent = PentestAgent(logger=logger)
     query = "对目标example.com 进行渗透测试"
     result = agent.run(query)
     print(result)

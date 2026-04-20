@@ -46,10 +46,17 @@ class PentestAgent:
         agent_mode: str = "default",
         template_dir: Optional[str | Path] = None,
         dynamic_config: Optional[dict[str, Any]] = None,
+        # ---- Loop / context configuration ----
+        max_turns: int = 0,
+        context_max_tokens: int = 0,
     ):
         self.model_id = model_id or os.getenv("MODEL_ID", "")
         self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.max_turns = max_turns or int(os.getenv("AGENT_MAX_LOOP", "0"))
+        self.context_max_tokens = context_max_tokens or int(
+            os.getenv("CONTEXT_MAX_TOKENS", "0")
+        )
 
         if not self.model_id:
             raise ValueError("Missing MODEL_ID. Set env var or pass to constructor.")
@@ -135,7 +142,11 @@ class PentestAgent:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": query},
         ]
-        state = LoopState(messages=messages)
+        state = LoopState(
+            messages=messages,
+            max_turns=self.max_turns,
+            context_max_tokens=self.context_max_tokens,
+        )
 
         # Callback to refresh the system prompt before each turn.
         # This allows Layer 3 runtime context (task graph, execution history)

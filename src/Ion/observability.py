@@ -1,5 +1,4 @@
 import json
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -45,6 +44,16 @@ class ObservabilityLogger:
         self.usage_stats["prompt_tokens"] += usage.get("prompt_tokens", 0)
         self.usage_stats["completion_tokens"] += usage.get("completion_tokens", 0)
         self.usage_stats["total_tokens"] += usage.get("total_tokens", 0)
+
+    def log_compression(self, summary: str, original_turns: int):
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "event": "context_compression",
+            "original_turns": original_turns,
+            "summary": summary[:2000],
+        }
+        with open(self._tool_log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     def get_usage_summary(self) -> dict:
         return dict(self.usage_stats)

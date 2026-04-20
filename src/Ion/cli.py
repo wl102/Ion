@@ -36,6 +36,14 @@ def main():
     parser.add_argument(
         "-i", "--interactive", action="store_true", help="Interactive mode"
     )
+    parser.add_argument(
+        "--max-turns", type=int, help="Override AGENT_MAX_LOOP (0 = unlimited)"
+    )
+    parser.add_argument(
+        "--context-max-tokens",
+        type=int,
+        help="Override CONTEXT_MAX_TOKENS (0 = disabled)",
+    )
 
     args = parser.parse_args()
 
@@ -64,6 +72,11 @@ def main():
         kwargs["template_dir"] = args.template_dir
 
     agent = PentestAgent(**kwargs)
+
+    if args.max_turns is not None:
+        kwargs["max_turns"] = args.max_turns
+    if args.context_max_tokens is not None:
+        kwargs["context_max_tokens"] = args.context_max_tokens
 
     if args.task_file:
         agent.load_tasks(args.task_file)
