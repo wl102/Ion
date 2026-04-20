@@ -4,12 +4,30 @@ import json
 import os
 import subprocess
 import sys
-from typing import get_type_hints, Optional
+from typing import get_args, get_origin, get_type_hints, Optional, Union
 
 import requests
 
 
 tool_map = {}
+
+
+def _json_type_from_annotation(annotation) -> str:
+    origin = get_origin(annotation)
+    if origin is Union:
+        non_none_args = [arg for arg in get_args(annotation) if arg is not type(None)]
+        if len(non_none_args) == 1:
+            return _json_type_from_annotation(non_none_args[0])
+        return "string"
+    if origin is list or annotation is list:
+        return "array"
+    if origin is dict or annotation is dict:
+        return "object"
+    if annotation is int:
+        return "integer"
+    if annotation is bool:
+        return "boolean"
+    return "string"
 
 
 def tool(name):
@@ -23,15 +41,7 @@ def tool(name):
         required = []
         for param_name, param in sig.parameters.items():
             ptype = hints.get(param_name, str)
-            json_type = "string"
-            if isinstance(ptype, int):
-                json_type = "integer"
-            elif isinstance(ptype, bool):
-                json_type = "boolean"
-            elif isinstance(ptype, list) or getattr(ptype, "__origin__", None) is list:
-                json_type = "array"
-            elif isinstance(ptype, dict) or getattr(ptype, "__origin__", None) is dict:
-                json_type = "object"
+            json_type = _json_type_from_annotation(ptype)
 
             desc = param_name.replace("_", " ")
             # 优先使用函数 docstring 中的参数描述（简化处理）
@@ -190,6 +200,13 @@ def register_task_tools(task_manager):
 
         if depend_on is None:
             depend_on = []
+        elif isinstance(depend_on, str):
+            depend_on = [depend_on]
+        elif not isinstance(depend_on, list):
+            return {
+                "success": False,
+                "output": f"Invalid depend_on type: {type(depend_on).__name__}",
+            }
         task = Task(name=name, description=description, depend_on=depend_on)
         task_manager.add_task(task)
         return {"success": True, "output": f"Task created: {task.id} - {task.name}"}

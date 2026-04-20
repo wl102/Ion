@@ -21,7 +21,7 @@ class Task(BaseModel):
     name: str
     description: str
     status: TaskStatus = TaskStatus.PENDING
-    depend_on: list[str] = []
+    depend_on: list[str] = Field(default_factory=list)
     result: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
