@@ -20,6 +20,11 @@
 {{ ready_tasks }}
 {% endif %}
 
+{% if failed_tasks %}
+### Failed Tasks (Replan Candidates)
+{{ failed_tasks }}
+{% endif %}
+
 {% if active_skills %}
 ### Active Skills
 {{ active_skills }}

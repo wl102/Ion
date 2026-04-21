@@ -110,9 +110,22 @@ class PromptBuilder:
             ready_lines = [f"- {t.id}: {t.name} — {t.description}" for t in ready]
             ready_text = "\n".join(ready_lines)
 
+        # Failed tasks (for replanning decisions)
+        failed = task_manager.get_failed_tasks()
+        failed_text = None
+        if failed:
+            failed_lines = []
+            for t in failed:
+                line = f"- {t.id}: {t.name} (attempts: {t.attempt_count}, strategy: {t.on_failure})"
+                if t.result:
+                    line += f" — {t.result[:150]}"
+                failed_lines.append(line)
+            failed_text = "\n".join(failed_lines)
+
         return {
             "task_graph_summary": graph_summary,
             "ready_tasks": ready_text,
+            "failed_tasks": failed_text,
         }
 
     @staticmethod

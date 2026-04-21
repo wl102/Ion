@@ -25,9 +25,16 @@ class Task(BaseModel):
     result: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    # Failure handling strategy
+    on_failure: str = Field(default="replan", pattern="^(retry|replan|skip)$")
+    attempt_count: int = 0
+    max_attempts: int = 1
 
     def model_post_init(self, __context):
         self.updated_at = datetime.now().isoformat()
+
+    def is_retryable(self) -> bool:
+        return self.status == TaskStatus.FAILED and self.on_failure == "retry" and self.attempt_count < self.max_attempts
 
 
 class TaskManager:
@@ -47,7 +54,13 @@ class TaskManager:
     def get_ready_tasks(self) -> list[Task]:
         ready = []
         for task in self._tasks.values():
-            if task.status != TaskStatus.PENDING:
+            if task.status == TaskStatus.COMPLETED:
+                continue
+            if task.status == TaskStatus.RUNNING:
+                continue
+            if task.status == TaskStatus.KILLED:
+                continue
+            if task.status == TaskStatus.FAILED and not task.is_retryable():
                 continue
             deps_satisfied = all(
                 self._tasks.get(dep_id) is not None
@@ -57,6 +70,9 @@ class TaskManager:
             if deps_satisfied:
                 ready.append(task)
         return ready
+
+    def get_failed_tasks(self) -> list[Task]:
+        return [t for t in self._tasks.values() if t.status == TaskStatus.FAILED]
 
     def update_status(
         self, task_id: str, status: TaskStatus, result: Optional[str] = None
@@ -68,6 +84,8 @@ class TaskManager:
         task.updated_at = datetime.now().isoformat()
         if result is not None:
             task.result = result
+        if status == TaskStatus.RUNNING:
+            task.attempt_count += 1
         return task
 
     def delete_task(self, task_id: str) -> bool:

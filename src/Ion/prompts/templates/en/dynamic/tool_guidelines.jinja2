@@ -38,8 +38,28 @@
 - `activate_skills`: Load full skill instructions into context when a task matches a skill's domain.
 - Skills may reference relative paths — resolve them against the skill's directory using absolute paths in tool calls.
 
-### Subagent Delegation (`run_subagent`)
-- Use for parallelizable subtasks that do not require global context synchronization.
-- Provide a clear, self-contained task description.
-- Optionally restrict available tools to prevent scope creep.
+### Subagent Delegation (`run_subagent`, `run_subagents`, `execute_ready_tasks`)
+- **Preferred pattern**: Call `execute_ready_tasks` — it auto-discovers ready tasks, spawns concurrent sub-agents, and returns a structured layer summary. This is your primary execution mechanism.
+- **Batch delegation**: Use `run_subagents` when you need to spawn a specific set of sub-agents that are not yet in the task graph.
+- **Single delegation**: Use `run_subagent` only for ad-hoc one-off subtasks outside the task graph.
+- Each sub-agent returns a **structured summary** (Key Findings / Conclusion / State / Recommended Next Steps). Base your strategic decisions on these summaries, not raw tool dumps.
+
+### Attack Graph Execution Workflow
+1. **Plan**: `create_task` to build the DAG. Use `depend_on` to enforce causal order.
+2. **Execute**: `execute_ready_tasks` to run the current ready layer concurrently.
+3. **Evaluate**: Analyze the layer summary. Check success/failure distribution.
+4. **Replan** (if needed): `replan_task` on failed tasks, providing `alternative_approaches`.
+5. **Iterate**: Go back to step 2 until the graph is fully resolved.
+
+### Replanning (`replan_task`)
+- Use when a task in the attack graph fails and you need to pivot to a different approach.
+- Provide `reason` (root cause) and `alternative_approaches` (list of new strategies).
+- The system creates alternative tasks that inherit the original dependencies, so downstream tasks naturally wait for the alternative to complete.
+- Example: If "SQLi via username field" fails, replan with alternatives like "SQLi via search parameter", "NoSQL injection", or "ORM bypass".
+
+### Task Graph State Inspection
+- `list_tasks`: Review the full graph.
+- `get_ready_tasks`: See what will execute next.
+- `get_attack_graph`: Export nodes/edges for structural analysis.
+- Use these before and after `execute_ready_tasks` to verify graph progression.
 </tool_guidelines>
