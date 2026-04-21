@@ -65,7 +65,8 @@ class Skill(BaseModel):
 class SkillRegistry:
     """Discovers, parses, and manages Agent Skills."""
 
-    BUILTIN_SKILLS_DIR = Path(__file__).parent / "skills"
+    # Built-in skills live alongside the package (src/Ion/skills/ directory)
+    BUILTIN_SKILLS_DIR = Path(__file__).parent
     USER_SKILLS_DIR = Path.home() / ".ion" / "skills"
     AGENTS_SKILLS_DIR = Path.home() / ".agents" / "skills"
 

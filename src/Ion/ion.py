@@ -3,7 +3,7 @@ import time
 from typing import Optional, Literal
 
 from pydantic import BaseModel
-from Ion.tools.tools import dispatch
+from Ion.tools.registry import dispatch
 
 
 class Message(BaseModel):

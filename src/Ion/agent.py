@@ -8,9 +8,11 @@ from openai import OpenAI
 from Ion.ion import LoopState, run_agent_loop
 from Ion.observability import ObservabilityLogger
 from Ion.prompts import PromptBuilder
-from Ion.skills import SkillRegistry
-from Ion.tasks import TaskManager
-from Ion.tools.tools import get_tools_schema, register_skill_tools, register_task_tools
+from Ion.skills.registry import SkillRegistry
+from Ion.skills.tools import register_skill_tools
+from Ion.tasks.manager import TaskManager
+from Ion.tasks.tools import register_task_tools
+from Ion.tools.registry import get_tools_schema
 
 load_dotenv()
 

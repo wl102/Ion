@@ -25,7 +25,6 @@ class Task(BaseModel):
     result: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
-    # Failure handling strategy
     on_failure: str = Field(default="replan", pattern="^(retry|replan|skip)$")
     attempt_count: int = 0
     max_attempts: int = 1
@@ -34,7 +33,11 @@ class Task(BaseModel):
         self.updated_at = datetime.now().isoformat()
 
     def is_retryable(self) -> bool:
-        return self.status == TaskStatus.FAILED and self.on_failure == "retry" and self.attempt_count < self.max_attempts
+        return (
+            self.status == TaskStatus.FAILED
+            and self.on_failure == "retry"
+            and self.attempt_count < self.max_attempts
+        )
 
 
 class TaskManager:

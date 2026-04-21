@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from Ion.ion import LoopState, run_agent_loop
-from Ion.tasks import TaskManager, Task, TaskStatus
-from Ion.tools.tools import get_tools_schema
+from Ion.tasks.manager import TaskManager, Task, TaskStatus
+from Ion.tools.registry import get_tools_schema
 
 
 @dataclass
@@ -49,7 +49,7 @@ class LayerReport:
         for r in self.executed:
             status = "SUCCESS" if r.success else "FAILED"
             lines.append(
-                f"  [{status}] {r.name} ({r.task_id}) — attempt #{r.attempt_count}: {r.summary[:200]}"
+                f"  [{status}] {r.name} ({r.task_id}) \u2014 attempt #{r.attempt_count}: {r.summary[:200]}"
             )
         return "\n".join(lines)
 

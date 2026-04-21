@@ -2,10 +2,11 @@ import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
+
 from openai import OpenAI
 
 from Ion.ion import LoopState, run_agent_loop
-from Ion.tools.tools import get_tools_schema, tool
+from Ion.tools.registry import get_tools_schema, tool
 
 
 def _create_client() -> tuple[OpenAI | None, str]:

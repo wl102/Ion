@@ -1,5 +1,5 @@
 from Ion.ion import run_agent_loop, LoopState, Message, run_one_turn
-from Ion.tasks import Task, TaskManager, TaskStatus
+from Ion.tasks.manager import Task, TaskManager, TaskStatus
 from Ion.agent import PentestAgent
 from Ion.observability import ObservabilityLogger
 from Ion.prompts import PromptBuilder
