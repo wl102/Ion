@@ -60,26 +60,6 @@ class TaskManager:
     def list_tasks(self) -> list[Task]:
         return list(self._tasks.values())
 
-    def get_ready_tasks(self) -> list[Task]:
-        ready = []
-        for task in self._tasks.values():
-            if task.status == TaskStatus.COMPLETED:
-                continue
-            if task.status == TaskStatus.RUNNING:
-                continue
-            if task.status == TaskStatus.KILLED:
-                continue
-            if task.status == TaskStatus.FAILED and not task.is_retryable():
-                continue
-            deps_satisfied = all(
-                self._tasks.get(dep_id) is not None
-                and self._tasks[dep_id].status == TaskStatus.COMPLETED
-                for dep_id in task.depend_on
-            )
-            if deps_satisfied:
-                ready.append(task)
-        return ready
-
     def get_failed_tasks(self) -> list[Task]:
         return [t for t in self._tasks.values() if t.status == TaskStatus.FAILED]
 
@@ -106,21 +86,47 @@ class TaskManager:
     def kill_task(self, task_id: str) -> Optional[Task]:
         return self.update_status(task_id, TaskStatus.KILLED)
 
-    def get_attack_graph(self) -> dict:
-        nodes = []
-        edges = []
-        for task in self._tasks.values():
-            nodes.append(
-                {
-                    "id": task.id,
-                    "name": task.name,
-                    "status": task.status.value,
-                    "description": task.description,
-                }
-            )
-            for dep_id in task.depend_on:
-                edges.append({"from": dep_id, "to": task.id})
-        return {"nodes": nodes, "edges": edges}
+    def attack_graph_view(self) -> str:
+        if not self._tasks:
+            return "No tasks yet."
+
+        task_map = {t.id: t for t in self._tasks.values()}
+
+        children_map: dict[str, list[str]] = {}
+        for tid, t in task_map.items():
+            for dep in t.depend_on:
+                children_map.setdefault(dep, []).append(tid)
+
+        root_ids = [tid for tid, t in task_map.items() if not t.depend_on]
+
+        lines = []
+
+        def print_tree(task_id: str, prefix: str = "", is_last: bool = True):
+            task = task_map.get(task_id)
+            if not task:
+                return
+            conn = "└── " if is_last else "├── "
+            lines.append(f"{prefix}{conn}[{task.status.value}] {task.name} ({task.id})")
+            children = children_map.get(task_id, [])
+            for i, child_id in enumerate(children):
+                new_prefix = prefix + ("    " if is_last else "│   ")
+                print_tree(child_id, new_prefix, i == len(children) - 1)
+
+        for i, root_id in enumerate(root_ids):
+            print_tree(root_id, is_last=i == len(root_ids) - 1)
+
+        all_deps = set()
+        for t in task_map.values():
+            all_deps.update(t.depend_on)
+        orphans = [
+            tid for tid in task_map if tid not in all_deps and task_map[tid].depend_on
+        ]
+
+        for tid in orphans:
+            task = task_map[tid]
+            lines.append(f"[{task.status.value}] {task.name} ({task.id}) - (orphan)")
+
+        return "\n".join(lines) if lines else "No tasks yet."
 
     def save_to_file(self, path: str | Path):
         data = [task.model_dump() for task in self._tasks.values()]
@@ -189,11 +195,9 @@ def _list_tasks(task_manager):
     return tool_result(success=True, output="\n".join(lines))
 
 
-def _get_attack_graph(task_manager):
-    graph = task_manager.get_attack_graph()
-    return tool_result(
-        success=True, output=json.dumps(graph, indent=2, ensure_ascii=False)
-    )
+def _attack_graph_view(task_manager):
+    result = task_manager.attack_graph_view()
+    return tool_result(success=True, output=result)
 
 
 # ---------------------------------------------------------------------------
@@ -265,11 +269,11 @@ LIST_TASKS_SCHEMA = {
     },
 }
 
-GET_ATTACK_GRAPH_SCHEMA = {
+ATTACK_GRAPH_VIEW_SCHEMA = {
     "type": "function",
     "function": {
-        "name": "get_attack_graph",
-        "description": "Get the current attack graph as nodes and edges.",
+        "name": "attack_graph_view",
+        "description": "View the attack graph as a tree structure.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }
@@ -319,10 +323,10 @@ registry.register(
 )
 
 registry.register(
-    name="get_attack_graph",
+    name="attack_graph_view",
     toolset="task",
-    schema=GET_ATTACK_GRAPH_SCHEMA,
-    handler=lambda **kw: _get_attack_graph(task_manager),
-    description="Get the current attack graph as nodes and edges.",
-    emoji="🕸️",
+    schema=ATTACK_GRAPH_VIEW_SCHEMA,
+    handler=lambda **kw: _attack_graph_view(task_manager),
+    description="View the attack graph as a tree structure.",
+    emoji="🌳",
 )
