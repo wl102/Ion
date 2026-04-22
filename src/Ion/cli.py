@@ -58,8 +58,10 @@ def main():
     if args.system_prompt:
         kwargs["system_prompt"] = args.system_prompt
     if args.log_dir:
+        import os
         from Ion.observability import ObservabilityLogger
 
+        os.environ.setdefault("ION_LOG_DIR", args.log_dir)
         kwargs["logger"] = ObservabilityLogger(log_dir=args.log_dir)
 
     # Layered prompt configuration

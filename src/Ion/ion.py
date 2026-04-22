@@ -188,34 +188,94 @@ Wrap your summary in <summary></summary> tags.""",
 
 
 def run_one_turn(
-    client, model_id: str, state: LoopState, tools: list[dict], logger=None
+    client, model_id: str, state: LoopState, tools: list[dict], logger=None, agent_name: str = "root"
 ):
-    response = client.chat.completions.create(
-        model=model_id,
-        messages=state.messages,
-        tools=tools,
-        tool_choice="auto",
-        stream=False,
-    )
-    msg = response.choices[0].message
+    prefix = f"[SubAgent: {agent_name}] " if agent_name != "root" else ""
+    prefix_printed = False
 
-    tool_calls_data = []
-    if msg.tool_calls:
-        for tc in msg.tool_calls:
-            tool_calls_data.append(tc.model_dump())
+    # Try streaming with usage; fall back if provider doesn't support stream_options.
+    try:
+        response = client.chat.completions.create(
+            model=model_id,
+            messages=state.messages,
+            tools=tools,
+            tool_choice="auto",
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+    except Exception:
+        response = client.chat.completions.create(
+            model=model_id,
+            messages=state.messages,
+            tools=tools,
+            tool_choice="auto",
+            stream=True,
+        )
+
+    content_parts = []
+    tool_calls_map = {}
+    finish_reason = None
+    usage = None
+
+    for chunk in response:
+        choice = chunk.choices[0] if chunk.choices else None
+        if choice is None:
+            # usage-only chunk when stream_options is supported
+            if hasattr(chunk, "usage") and chunk.usage:
+                usage = chunk.usage
+            continue
+
+        delta = choice.delta
+
+        if delta and delta.content:
+            if prefix and not prefix_printed:
+                print(prefix, end="", flush=True)
+                prefix_printed = True
+            text = delta.content
+            content_parts.append(text)
+            print(text, end="", flush=True)
+
+        if delta and delta.tool_calls:
+            for tc_delta in delta.tool_calls:
+                idx = tc_delta.index
+                if idx not in tool_calls_map:
+                    tool_calls_map[idx] = {
+                        "id": "",
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""},
+                    }
+                tc = tool_calls_map[idx]
+                if tc_delta.id:
+                    tc["id"] = tc_delta.id
+                if tc_delta.type:
+                    tc["type"] = tc_delta.type
+                if tc_delta.function:
+                    if tc_delta.function.name:
+                        tc["function"]["name"] = tc_delta.function.name
+                    if tc_delta.function.arguments:
+                        tc["function"]["arguments"] += tc_delta.function.arguments
+
+        if choice.finish_reason is not None:
+            finish_reason = choice.finish_reason
+
+    if content_parts:
+        print()
+
+    content = "".join(content_parts)
+    tool_calls_data = list(tool_calls_map.values())
 
     assistant_message = {
         "role": "assistant",
-        "content": msg.content,
+        "content": content or None,
     }
     if tool_calls_data:
         assistant_message["tool_calls"] = tool_calls_data
     state.messages.append(assistant_message)
 
-    if response.choices[0].finish_reason == "tool_calls":
-        for tool in msg.tool_calls if msg.tool_calls else []:
-            name = tool.function.name
-            args = json.loads(tool.function.arguments)
+    if finish_reason == "tool_calls":
+        for tool in tool_calls_data:
+            name = tool["function"]["name"]
+            args = json.loads(tool["function"]["arguments"])
 
             start = time.time()
 
@@ -228,15 +288,20 @@ def run_one_turn(
             state.messages.append(
                 {
                     "role": "tool",
-                    "tool_call_id": tool.id,
+                    "tool_call_id": tool["id"],
                     "content": output,
                 }
             )
 
     state.turn_count += 1
-    state.finish_reason = response.choices[0].finish_reason
+    state.finish_reason = finish_reason
 
-    if logger and hasattr(response, "usage") and response.usage:
+    if usage:
+        if logger:
+            logger.record_token_usage(usage.model_dump())
+        state.last_prompt_tokens = usage.prompt_tokens
+        state.last_message_count = len(state.messages)
+    elif logger and hasattr(response, "usage") and response.usage:
         logger.record_token_usage(response.usage.model_dump())
         state.last_prompt_tokens = response.usage.prompt_tokens
         state.last_message_count = len(state.messages)
@@ -249,6 +314,7 @@ def run_agent_loop(
     tools: list[dict],
     logger=None,
     on_before_turn=None,
+    agent_name: str = "root",
 ):
     """
     Run the agent loop until a non-tool-calls finish reason is reached.
@@ -257,32 +323,42 @@ def run_agent_loop(
         on_before_turn: Optional callback(state) invoked before each turn.
                         Can be used to refresh the system prompt with
                         updated runtime context (e.g., task graph state).
+        agent_name: Identifier used for stdout prefixing (sub-agents).
     """
-    while True:
-        # --- max turns guard ---
-        if state.max_turns > 0 and state.turn_count >= state.max_turns:
-            state.finish_reason = "max_turns_reached"
-            return
+    from Ion.observability import _observability_logger_ctx
 
-        # --- pre-turn context compression ---
-        if state.context_max_tokens > 0:
-            estimated = _estimate_tokens(state)
-            if estimated > state.context_max_tokens - 20000:
+    token = None
+    if logger is not None:
+        token = _observability_logger_ctx.set(logger)
+    try:
+        while True:
+            # --- max turns guard ---
+            if state.max_turns > 0 and state.turn_count >= state.max_turns:
+                state.finish_reason = "max_turns_reached"
+                return
+
+            # --- pre-turn context compression ---
+            if state.context_max_tokens > 0:
+                estimated = _estimate_tokens(state)
+                if estimated > state.context_max_tokens - 20000:
+                    _compress_context(client, model_id, state, logger)
+
+            if on_before_turn is not None:
+                on_before_turn(state)
+
+            run_one_turn(client, model_id, state, tools, logger, agent_name=agent_name)
+
+            # --- post-turn length handling ---
+            if state.finish_reason == "length":
+                # Remove the truncated assistant message before compressing
+                if state.messages and state.messages[-1].get("role") == "assistant":
+                    state.messages.pop()
                 _compress_context(client, model_id, state, logger)
+                state.finish_reason = None
+                continue  # retry the turn after compression
 
-        if on_before_turn is not None:
-            on_before_turn(state)
-
-        run_one_turn(client, model_id, state, tools, logger)
-
-        # --- post-turn length handling ---
-        if state.finish_reason == "length":
-            # Remove the truncated assistant message before compressing
-            if state.messages and state.messages[-1].get("role") == "assistant":
-                state.messages.pop()
-            _compress_context(client, model_id, state, logger)
-            state.finish_reason = None
-            continue  # retry the turn after compression
-
-        if state.finish_reason != "tool_calls":
-            return
+            if state.finish_reason != "tool_calls":
+                return
+    finally:
+        if token is not None:
+            _observability_logger_ctx.reset(token)

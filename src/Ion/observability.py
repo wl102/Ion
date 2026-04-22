@@ -1,8 +1,21 @@
+import contextvars
 import json
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
+
+
+# Context variable to track the active logger across sync/async boundaries.
+_observability_logger_ctx: contextvars.ContextVar[Optional["ObservabilityLogger"]] = contextvars.ContextVar(
+    "observability_logger", default=None
+)
+
+
+def get_current_logger() -> Optional["ObservabilityLogger"]:
+    """Return the ObservabilityLogger active in the current execution context."""
+    return _observability_logger_ctx.get()
 
 
 class ObservabilityLogger:
@@ -13,6 +26,8 @@ class ObservabilityLogger:
         parent_run_id: Optional[str] = None,
         agent_name: Optional[str] = None,
     ):
+        if log_dir is None:
+            log_dir = os.getenv("ION_LOG_DIR")
         if log_dir is None:
             log_dir = Path.home() / ".ion" / "logs"
         self.log_dir = Path(log_dir)

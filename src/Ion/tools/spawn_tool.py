@@ -9,11 +9,11 @@ from openai import OpenAI
 
 from .registry import registry, tool_error, tool_result
 from Ion.agents.registry import agent_registry
-from Ion.observability import ObservabilityLogger
+from Ion.observability import ObservabilityLogger, get_current_logger
 from Ion.prompts import PromptBuilder
 
 
-async def _async_run_subagent(
+def _run_subagent(
     agent_name: str, task_goal: str, context: str, tools: Optional[list] = None
 ):
     """Spawn a sub-agent with the specified agent type to handle a sub-task.
@@ -97,10 +97,26 @@ async def _async_run_subagent(
     )
 
     # Create a child logger so the sub-agent's tool calls are also recorded.
-    sub_logger = ObservabilityLogger(agent_name=agent_name)
+    parent_logger = get_current_logger()
+    if parent_logger is not None:
+        sub_logger = parent_logger.child_logger(agent_name)
+    else:
+        sub_logger = ObservabilityLogger(agent_name=agent_name)
     sub_logger.log_subagent_spawn(agent_name, task_goal, context)
 
-    run_agent_loop(client, model_id, state, filtered_tools, logger=sub_logger)
+    print(f"\n[SubAgent: {agent_name}] Starting task: {task_goal}\n")
+    try:
+        run_agent_loop(
+            client, model_id, state, filtered_tools, logger=sub_logger, agent_name=agent_name
+        )
+    except Exception as exc:
+        sub_logger.log_subagent_finish(
+            agent_name=agent_name,
+            result=str(exc),
+            turns_used=state.turn_count,
+            finish_reason="error",
+        )
+        raise
 
     last_msg = state.messages[-1] if state.messages else {}
     result = last_msg.get("content", "") or ""
@@ -195,9 +211,9 @@ registry.register(
     toolset="subagent",
     schema=RUN_SUBAGENT_SCHEMA,
     handler=lambda agent_name, task_goal, context, tools=None, **kw: (
-        _async_run_subagent(agent_name, task_goal, context, tools)
+        _run_subagent(agent_name, task_goal, context, tools)
     ),
     description="Spawn a sub-agent to handle a specific sub-task.",
     emoji="🚀",
-    is_async=True,
+    is_async=False,
 )
