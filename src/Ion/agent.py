@@ -8,6 +8,7 @@ from openai import OpenAI
 from Ion.ion import LoopState, run_agent_loop
 from Ion.observability import ObservabilityLogger
 from Ion.prompts import PromptBuilder
+from Ion.agents.registry import AgentRegistry
 from Ion.skills.registry import SkillRegistry
 from Ion.skills.tools import register_skill_tools
 from Ion.tasks.manager import TaskManager
@@ -42,6 +43,7 @@ class PentestAgent:
         system_prompt: Optional[str] = None,
         task_manager: Optional[TaskManager] = None,
         skill_registry: Optional[SkillRegistry] = None,
+        agent_registry: Optional[AgentRegistry] = None,
         logger: Optional[ObservabilityLogger] = None,
         # ---- Layered prompt configuration ----
         use_layered_prompts: bool = True,
@@ -74,6 +76,7 @@ class PentestAgent:
         self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
         self.task_manager = task_manager or TaskManager()
         self.skill_registry = skill_registry or SkillRegistry()
+        self.agent_registry = agent_registry or AgentRegistry()
         self.logger = logger or ObservabilityLogger()
 
         # 注册依赖上下文的工具（task / skill）
@@ -127,9 +130,22 @@ class PentestAgent:
     ) -> str:
         """Build the complete system prompt from all three layers."""
         if not self.use_layered_prompts or self._prompt_builder is None:
-            return self._fallback_prompt or DEFAULT_SYSTEM_PROMPT
+            prompt = self._fallback_prompt or DEFAULT_SYSTEM_PROMPT
+            # Inject sub-agent catalog so the parent agent knows what it can delegate
+            subagent_catalog = self.agent_registry.get_catalog_xml()
+            if subagent_catalog:
+                prompt += (
+                    f"\n\nYou may delegate specialized tasks to sub-agents. "
+                    f"Use list_subagents to see available agents and spawn_subagent to delegate.\n\n"
+                    f"{subagent_catalog}"
+                )
+            return prompt
 
         runtime_ctx = self._build_runtime_context(user_goal, messages)
+        # Inject sub-agent catalog into runtime context for layered prompts
+        subagent_catalog = self.agent_registry.get_catalog_xml()
+        if subagent_catalog:
+            runtime_ctx["subagent_catalog"] = subagent_catalog
         return self._prompt_builder.build_system_prompt(runtime_ctx)
 
     # ------------------------------------------------------------------ #

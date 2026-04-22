@@ -174,6 +174,11 @@ class ToolRegistry:
 registry = ToolRegistry()
 
 
+def dispatch(tool_name, **kw) -> str:
+    """Module-level convenience wrapper for registry.dispatch()."""
+    return registry.dispatch(tool_name, **kw)
+
+
 # ---------------------------------------------------------------------------
 # Helpers for tool response serialization
 # ---------------------------------------------------------------------------
