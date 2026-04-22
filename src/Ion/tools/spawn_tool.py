@@ -9,7 +9,7 @@ from openai import OpenAI
 
 from .registry import registry, tool_error, tool_result
 from Ion.agents.registry import agent_registry
-from Ion.ion import LoopState, run_agent_loop
+from Ion.observability import ObservabilityLogger
 from Ion.prompts import PromptBuilder
 
 
@@ -88,16 +88,29 @@ async def _async_run_subagent(
         {"role": "user", "content": task_goal},
     ]
 
+    from Ion.ion import LoopState, run_agent_loop
+
     state = LoopState(
         messages=messages,
         max_turns=15,
         context_max_tokens=8000,
     )
 
-    run_agent_loop(client, model_id, state, filtered_tools, logger=None)
+    # Create a child logger so the sub-agent's tool calls are also recorded.
+    sub_logger = ObservabilityLogger(agent_name=agent_name)
+    sub_logger.log_subagent_spawn(agent_name, task_goal, context)
+
+    run_agent_loop(client, model_id, state, filtered_tools, logger=sub_logger)
 
     last_msg = state.messages[-1] if state.messages else {}
     result = last_msg.get("content", "") or ""
+
+    sub_logger.log_subagent_finish(
+        agent_name=agent_name,
+        result=result,
+        turns_used=state.turn_count,
+        finish_reason=state.finish_reason,
+    )
 
     return tool_result(
         success=True,

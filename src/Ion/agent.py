@@ -10,9 +10,15 @@ from Ion.prompts import PromptBuilder
 from Ion.agents.registry import AgentRegistry
 from Ion.skills.registry import SkillRegistry
 from Ion.skills.tools import register_skill_tools
-from Ion.tasks.manager import TaskManager
-from Ion.tasks.tools import register_task_tools
-from Ion.tools.registry import get_tools_schema
+from Ion.tools.registry import registry
+from Ion.tools.task_tool import TaskManager, register_task_tools
+
+# Import remaining built-in tools so their side-effect registrations fire.
+import Ion.tools.shell  # noqa: F401
+import Ion.tools.programing  # noqa: F401
+import Ion.tools.network_tool  # noqa: F401
+import Ion.tools.web_search  # noqa: F401
+import Ion.tools.spawn_tool  # noqa: F401
 
 load_dotenv()
 
@@ -81,7 +87,7 @@ class PentestAgent:
         register_task_tools(self.task_manager)
         register_skill_tools(self.skill_registry)
 
-        self.tools = get_tools_schema()
+        self.tools = registry.get_tools_schema()
         self.use_layered_prompts = use_layered_prompts
         self.agent_mode = agent_mode
 
