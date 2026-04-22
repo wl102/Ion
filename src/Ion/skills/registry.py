@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import shutil
+import yaml
 from pathlib import Path
 from typing import Optional
 
-import yaml
 from pydantic import BaseModel, Field
 
 
@@ -68,7 +68,7 @@ class SkillRegistry:
     # Built-in skills live alongside the package (src/Ion/skills/ directory)
     BUILTIN_SKILLS_DIR = Path(__file__).parent
     USER_SKILLS_DIR = Path.home() / ".ion" / "skills"
-    AGENTS_SKILLS_DIR = Path.home() / ".agents" / "skills"
+    PROJECT_SKILLS_DIR = Path.cwd() / ".ion" / "skills"
 
     def __init__(self, extra_dirs: Optional[list[str | Path]] = None):
         self._skills: dict[str, Skill] = {}
@@ -84,7 +84,7 @@ class SkillRegistry:
         # 2. ~/.ion/skills/ (client-native)
         self._search_dirs.append(self.USER_SKILLS_DIR)
         # 3. ~/.agents/skills/ (cross-client interoperability)
-        self._search_dirs.append(self.AGENTS_SKILLS_DIR)
+        self._search_dirs.append(self.PROJECT_SKILLS_DIR)
 
         self.discover()
 
@@ -240,3 +240,6 @@ class SkillRegistry:
             lines.append("  </skill>")
         lines.append("</available_skills>")
         return "\n".join(lines)
+
+
+skill_registry = SkillRegistry()

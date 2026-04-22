@@ -229,7 +229,7 @@ def run_one_turn(
                 {
                     "role": "tool",
                     "tool_call_id": tool.id,
-                    "content": json.dumps(output, ensure_ascii=False),
+                    "content": output,
                 }
             )
 
