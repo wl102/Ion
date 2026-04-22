@@ -273,6 +273,10 @@ def run_one_turn(
     state.messages.append(assistant_message)
 
     if finish_reason == "tool_calls":
+        tool_names = [t["function"]["name"] for t in tool_calls_data]
+        exec_prefix = f"[{agent_name}] " if agent_name != "root" else ""
+        print(f"{exec_prefix}🔧 Executing: {', '.join(tool_names)}")
+
         for tool in tool_calls_data:
             name = tool["function"]["name"]
             args = json.loads(tool["function"]["arguments"])

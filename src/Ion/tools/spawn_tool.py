@@ -92,7 +92,7 @@ def _run_subagent(
 
     state = LoopState(
         messages=messages,
-        max_turns=15,
+        max_turns=int(os.getenv("SUB_AGENT_MAX_LOOP", "50")),
         context_max_tokens=8000,
     )
 
