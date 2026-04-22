@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
@@ -6,7 +7,33 @@ from typing import Optional
 from openai import OpenAI
 
 from Ion.ion import LoopState, run_agent_loop
-from Ion.tools.registry import get_tools_schema, tool
+from Ion.tools.registry import get_tools_schema, registry, tool_error, tool_result
+
+
+}
+
+RUN_SUBAGENTS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "run_subagents",
+        "description": "Spawn multiple sub-agents concurrently.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "description": "List of task dicts, each with task_id, description, and optional tools",
+                }
+            },
+            "required": ["tasks"],
+        },
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def _create_client() -> tuple[OpenAI | None, str]:
@@ -52,7 +79,11 @@ def _summarize_subagent_output(client: OpenAI, model_id: str, content: str) -> s
 
 
 def _run_subagent_sync(task_description: str, tools: Optional[list] = None) -> dict:
-    """Synchronous core of sub-agent execution."""
+    """Synchronous core of sub-agent execution.
+
+    Returns a dict (not a JSON string) so that run_subagents can consume it
+    directly before dispatch serialises it.
+    """
     client, model_id = _create_client()
     if client is None:
         return {
@@ -81,29 +112,30 @@ def _run_subagent_sync(task_description: str, tools: Optional[list] = None) -> d
         summary = _summarize_subagent_output(client, model_id, content)
         return {"success": True, "output": summary, "full_output": content}
     except Exception as e:
+        logging.warning(f"Unexpected error in run_subagent_sync: {e}", exc_info=True)
         return {"success": False, "output": f"Subagent error: {e}"}
 
 
-@tool("run_subagent")
-def run_subagent(task_description: str, tools: Optional[list] = None) -> dict:
-    """Spawn a sub-agent to handle a specific sub-task.
-    task_description: What the sub-agent should do.
-    tools: Optional list of tool names to restrict the sub-agent to.
-    """
-    return _run_subagent_sync(task_description, tools)
+# ---------------------------------------------------------------------------
+# Registration
+# ---------------------------------------------------------------------------
+
+registry.register(
+    name="run_subagent",
+    toolset="subagent",
+    schema=RUN_SUBAGENT_SCHEMA,
+    handler=lambda task_description, tools=None, **kw: _run_subagent_sync(
+        task_description, tools
+    ),
+    description="Spawn a sub-agent to handle a specific sub-task.",
+    emoji="🤖",
+)
 
 
-@tool("run_subagents")
-def run_subagents(tasks: list) -> dict:
-    """Spawn multiple sub-agents concurrently.
-    tasks: List of dicts, each with keys:
-      - task_id (str): Identifier for this task
-      - description (str): What the sub-agent should do
-      - tools (list[str], optional): Tool names to restrict the sub-agent to
-    Returns a structured summary of all sub-agent results.
-    """
+def _run_subagents_handler(tasks, **kw) -> str:
+    """Handler for run_subagents — returns a JSON string."""
     if not tasks:
-        return {"success": True, "output": "No tasks provided.", "results": []}
+        return tool_result(success=True, output="No tasks provided.", results=[])
 
     async def _batch() -> list[dict]:
         loop = asyncio.get_running_loop()
@@ -147,6 +179,17 @@ def run_subagents(tasks: list) -> dict:
                 for r in results
             )
         )
-        return {"success": True, "output": summary, "results": results}
+        return tool_result(success=True, output=summary, results=results)
     except Exception as e:
-        return {"success": False, "output": f"Batch execution error: {e}"}
+        logging.warning(f"Unexpected error in run_subagents: {e}", exc_info=True)
+        return tool_error(f"Batch execution error: {e}")
+
+
+registry.register(
+    name="run_subagents",
+    toolset="subagent",
+    schema=RUN_SUBAGENTS_SCHEMA,
+    handler=_run_subagents_handler,
+    description="Spawn multiple sub-agents concurrently.",
+    emoji="👥",
+)
