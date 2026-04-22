@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
@@ -48,7 +47,6 @@ class PentestAgent:
         # ---- Layered prompt configuration ----
         use_layered_prompts: bool = True,
         agent_mode: str = "default",
-        template_dir: Optional[str | Path] = None,
         dynamic_config: Optional[dict[str, Any]] = None,
         # ---- Loop / context configuration ----
         max_turns: int = 0,
@@ -90,9 +88,7 @@ class PentestAgent:
         # ---- Build prompt builder (Layer 1 + Layer 2) ----
         if self.use_layered_prompts:
             dyn_cfg = {"agent_mode": self.agent_mode, **(dynamic_config or {})}
-            self._prompt_builder = PromptBuilder(
-                template_dir=template_dir, dynamic_config=dyn_cfg
-            )
+            self._prompt_builder = PromptBuilder(dynamic_config=dyn_cfg)
             self._fallback_prompt = None
         else:
             # Legacy mode: hard-coded system prompt
@@ -121,6 +117,10 @@ class PentestAgent:
             tools_schema=self.tools,
             messages=messages,
         )
+        # Inject sub-agent catalog so the parent agent knows what it can delegate
+        subagent_catalog = self.agent_registry.get_catalog_xml()
+        if subagent_catalog:
+            ctx["subagent_catalog"] = subagent_catalog
         # Inject active skills content if any were activated during the session.
         # SkillRegistry currently does not track active state; we surface catalog instead.
         return ctx
@@ -142,10 +142,6 @@ class PentestAgent:
             return prompt
 
         runtime_ctx = self._build_runtime_context(user_goal, messages)
-        # Inject sub-agent catalog into runtime context for layered prompts
-        subagent_catalog = self.agent_registry.get_catalog_xml()
-        if subagent_catalog:
-            runtime_ctx["subagent_catalog"] = subagent_catalog
         return self._prompt_builder.build_system_prompt(runtime_ctx)
 
     # ------------------------------------------------------------------ #

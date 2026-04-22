@@ -216,7 +216,7 @@ CREATE_TASK_SCHEMA = {
                 "description": {"type": "string", "description": "What this task does"},
                 "depend_on": {
                     "type": "array",
-                    "description": "List of task IDs this task depends on",
+                    "description": "List of task IDs this task depends on. Use this to build causal prerequisite chains in the attack path graph.",
                 },
             },
             "required": ["name", "description"],

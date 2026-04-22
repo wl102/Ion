@@ -10,6 +10,7 @@ from openai import OpenAI
 from .registry import registry, tool_error, tool_result
 from Ion.agents.registry import agent_registry
 from Ion.ion import LoopState, run_agent_loop
+from Ion.prompts import PromptBuilder
 
 
 async def _async_run_subagent(
@@ -25,17 +26,6 @@ async def _async_run_subagent(
     if agent is None:
         available = ", ".join(agent_registry.list_agents()) or "none"
         return tool_error(f"Sub-agent '{agent_name}' not found. Available: {available}")
-
-    agent_body = agent.activate()
-
-    system_prompt = (
-        f"You are {agent.name}, a specialized cybersecurity sub-agent.\n\n"
-        f"{agent_body}\n\n"
-        f"## Task\n{task_goal}\n\n"
-        f"## Context from parent agent\n{context}\n\n"
-        f"Important: You are a sub-agent. Do NOT spawn additional sub-agents. "
-        f"Complete the assigned task directly using your available tools."
-    )
 
     # ------------------------------------------------------------------
     # Filter tools: remove delegation tools to prevent recursive spawning
@@ -57,6 +47,24 @@ async def _async_run_subagent(
 
     if not filtered_tools:
         return tool_error("No tools available for the sub-agent after filtering.")
+
+    # Build a human-readable tools description for the sub-agent
+    tools_desc_lines = []
+    for t in filtered_tools:
+        func = t.get("function", {})
+        tname = func.get("name", "unknown")
+        tdesc = func.get("description", "")
+        tools_desc_lines.append(f"- `{tname}`: {tdesc}")
+    tools_description = "\n".join(tools_desc_lines) if tools_desc_lines else None
+
+    agent_body = agent.activate()
+    system_prompt = PromptBuilder.build_subagent_prompt(
+        agent_name=agent.name,
+        agent_body=agent_body,
+        task_goal=task_goal,
+        parent_context=context,
+        tools_description=tools_description,
+    )
 
     # ------------------------------------------------------------------
     # Build a lightweight agent loop directly (avoid re-initialising a full
@@ -134,7 +142,7 @@ RUN_SUBAGENT_SCHEMA = {
                 },
                 "context": {
                     "type": "string",
-                    "description": "the sub-agent own context window from parent.",
+                    "description": "Relevant context from the parent agent to ground the sub-agent's work.",
                 },
                 "tools": {
                     "type": "array",

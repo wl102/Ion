@@ -12,7 +12,5 @@ wheels/
 # .env
 .env
 .codex
-
-agentskills
-
-luaniao
+.ruff_cache
+.claude

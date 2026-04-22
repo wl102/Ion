@@ -31,9 +31,6 @@ def main():
         help="Disable layered prompts and use the legacy hard-coded system prompt",
     )
     parser.add_argument(
-        "--template-dir", help="Custom Jinja2 template directory for layered prompts"
-    )
-    parser.add_argument(
         "-i", "--interactive", action="store_true", help="Interactive mode"
     )
     parser.add_argument(
@@ -68,8 +65,6 @@ def main():
     # Layered prompt configuration
     kwargs["use_layered_prompts"] = not args.no_layered_prompts
     kwargs["agent_mode"] = args.agent_mode
-    if args.template_dir:
-        kwargs["template_dir"] = args.template_dir
 
     agent = PentestAgent(**kwargs)
 
