@@ -14,3 +14,4 @@ wheels/
 .codex
 .ruff_cache
 .claude
+logs/

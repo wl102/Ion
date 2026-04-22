@@ -31,7 +31,7 @@ class Task(BaseModel):
     result: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
-    on_failure: str = Field(default="replan", pattern="^(retry|skip)$")
+    on_failure: str = Field(default="replan", pattern="^(retry|skip|replan)$")
     attempt_count: int = 0
     max_attempts: int = 1
 
@@ -62,6 +62,18 @@ class TaskManager:
 
     def get_failed_tasks(self) -> list[Task]:
         return [t for t in self._tasks.values() if t.status == TaskStatus.FAILED]
+
+    def get_ready_tasks(self) -> list[Task]:
+        """Return tasks that are pending and have all dependencies completed."""
+        completed_ids = {
+            t.id for t in self._tasks.values() if t.status == TaskStatus.COMPLETED
+        }
+        return [
+            t
+            for t in self._tasks.values()
+            if t.status == TaskStatus.PENDING
+            and all(dep in completed_ids for dep in t.depend_on)
+        ]
 
     def update_status(
         self, task_id: str, status: TaskStatus, result: Optional[str] = None
@@ -201,6 +213,63 @@ def _attack_graph_view(task_manager):
 
 
 # ---------------------------------------------------------------------------
+# Registration helpers
+# ---------------------------------------------------------------------------
+
+
+def register_task_tools(task_manager):
+    """Register task tools with a custom task manager instance."""
+    registry.register(
+        name="create_task",
+        toolset="task",
+        schema=CREATE_TASK_SCHEMA,
+        handler=lambda name, description, depend_on=None, on_failure="replan", **kw: (
+            _create_task(task_manager, name, description, depend_on, on_failure)
+        ),
+        description="Create a new task in the attack graph.",
+        emoji="📋",
+    )
+
+    registry.register(
+        name="update_task",
+        toolset="task",
+        schema=UPDATE_TASK_SCHEMA,
+        handler=lambda task_id, status, result=None, **kw: _update_task(
+            task_manager, task_id, status, result
+        ),
+        description="Update a task's status and optionally its result.",
+        emoji="📝",
+    )
+
+    registry.register(
+        name="delete_task",
+        toolset="task",
+        schema=DELETE_TASK_SCHEMA,
+        handler=lambda task_id, **kw: _delete_task(task_manager, task_id),
+        description="Delete a task from the attack graph.",
+        emoji="🗑️",
+    )
+
+    registry.register(
+        name="list_tasks",
+        toolset="task",
+        schema=LIST_TASKS_SCHEMA,
+        handler=lambda **kw: _list_tasks(task_manager),
+        description="List all tasks in the attack graph.",
+        emoji="📜",
+    )
+
+    registry.register(
+        name="attack_graph_view",
+        toolset="task",
+        schema=ATTACK_GRAPH_VIEW_SCHEMA,
+        handler=lambda **kw: _attack_graph_view(task_manager),
+        description="View the attack graph as a tree structure.",
+        emoji="🌳",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Inline schemas
 # ---------------------------------------------------------------------------
 
@@ -277,56 +346,3 @@ ATTACK_GRAPH_VIEW_SCHEMA = {
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }
-
-# ---------------------------------------------------------------------------
-# Registration
-# ---------------------------------------------------------------------------
-
-registry.register(
-    name="create_task",
-    toolset="task",
-    schema=CREATE_TASK_SCHEMA,
-    handler=lambda name, description, depend_on=None, on_failure="replan", **kw: (
-        _create_task(task_manager, name, description, depend_on, on_failure)
-    ),
-    description="Create a new task in the attack graph.",
-    emoji="📋",
-)
-
-registry.register(
-    name="update_task",
-    toolset="task",
-    schema=UPDATE_TASK_SCHEMA,
-    handler=lambda task_id, status, result=None, **kw: _update_task(
-        task_manager, task_id, status, result
-    ),
-    description="Update a task's status and optionally its result.",
-    emoji="📝",
-)
-
-registry.register(
-    name="delete_task",
-    toolset="task",
-    schema=DELETE_TASK_SCHEMA,
-    handler=lambda task_id, **kw: _delete_task(task_manager, task_id),
-    description="Delete a task from the attack graph.",
-    emoji="🗑️",
-)
-
-registry.register(
-    name="list_tasks",
-    toolset="task",
-    schema=LIST_TASKS_SCHEMA,
-    handler=lambda **kw: _list_tasks(task_manager),
-    description="List all tasks in the attack graph.",
-    emoji="📜",
-)
-
-registry.register(
-    name="attack_graph_view",
-    toolset="task",
-    schema=ATTACK_GRAPH_VIEW_SCHEMA,
-    handler=lambda **kw: _attack_graph_view(task_manager),
-    description="View the attack graph as a tree structure.",
-    emoji="🌳",
-)
