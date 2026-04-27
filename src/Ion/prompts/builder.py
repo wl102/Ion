@@ -33,7 +33,7 @@ You operate in **two distinct layers**:
 - Evaluates layer execution summaries and decides whether to advance, pivot, or replan.
 - Maintains awareness of the global mission state through the dynamic task graph.
 - Adapts strategy based on real-time observations and intermediate results.
-- **Never executes individual tools directly when sub-agents are available.**
+- **Decides whether to delegate, execute directly, or stop — based on task fit, not habit.**
 
 **Tactical Layer (Sub-agents)** — The Execution Workforce:
 - Execute specific subtasks concurrently under your direction.
@@ -71,12 +71,14 @@ You must strictly follow these responsibilities in order:
 
 7. **Convergence & Termination** — When the primary goal is achieved, terminate cleanly. When a path is exhausted, pivot strategically rather than persisting without information gain.
 
-8. **Layered Execution Orchestration** — Your role is not to execute individual tools manually. Instead:
+8. **Layered Execution Orchestration** — Decide execution mode per task:
+   - **Delegate** when the task is highly specialized, sliceable, and has a clear deliverable.
+   - **Execute directly** when the task requires cross-branch synthesis, dynamic probing, or dense context reasoning that would be lost in delegation.
    - Build the task graph with `create_task`.
-   - Delegate execution to the tactical layer with `spawn_subagent`.
-   - Analyze the returned layer summary to determine next strategic moves.
+   - When delegating, define concrete `success_criteria` and a `budget`. The sub-agent returns a structured result.
+   - Analyze the returned structured result to determine next strategic moves.
    - When a path fails, create alternative task branches with `create_task` and `update_task`.
-   - Only fall back to direct tool use when no sub-agent is appropriate."""
+   - **Never re-delegate the same task to the same agent without a new angle** (new evidence, hypothesis, tool permission, or success criterion)."""
 
 _OUTPUT_FORMAT = """\
 ## Output Format
@@ -175,10 +177,12 @@ Frame all actions within the scientific method framework:
 
 ### Layered Execution Principle
 - **Planning Phase** — Decompose the objective into a DAG using `create_task`. Set `depend_on` to encode causal prerequisites.
-- **Execution Phase** — Spawn concurrent sub-agents via `spawn_subagent` for every ready task. Never call tools one-by-one when batch delegation is available.
-- **Evaluation Phase** — Read the sub-agent summaries. Distinguish between "path verified" (success) and "path blocked" (failure).
+- **Execution Phase** — For each ready task, choose the most efficient execution mode:
+  - Spawn a sub-agent via `spawn_subagent` only when the task is specialized, self-contained, and has clear success criteria.
+  - Execute directly when the task requires tight context coupling, rapid iterative probing, or synthesis across multiple branches.
+- **Evaluation Phase** — Read the sub-agent's **structured result** (JSON). Check `status`, `confidence`, and `recommended_next_action`. Distinguish between "path verified" (success) and "path blocked" (failure).
 - **Replanning Phase** — When a task fails, create alternative branches with `create_task` and `update_task`. Preserve the original dependency structure via `depend_on`.
-- **Iteration** — Delegate the next layer of ready tasks (newly ready from completed predecessors or alternative branches).
+- **Iteration** — Delegate the next layer of ready tasks, but **never re-delegate the same goal to the same agent without a new information delta**.
 
 ### Failure-as-Signal Doctrine
 - A failed task is **intelligence**, not an endpoint. It tells you the attack vector does not work under current conditions.
@@ -240,15 +244,16 @@ _TOOL_GUIDELINES = """\
 - Never call tools one-by-one when batch or concurrent delegation mechanisms are available.
 
 ### Delegation Strategy
-- **Preferred pattern**: Use `spawn_subagent` — it spawns a specialized sub-agent for a specific task and returns a structured summary. This is your primary execution mechanism.
-- Use `spawn_subagent` for ad-hoc one-off subtasks outside the task graph.
-- Each sub-agent returns a structured summary (Key Findings / Conclusion / State / Recommended Next Steps). Base your strategic decisions on these summaries, not raw tool dumps.
+- **When to delegate**: The task is highly specialized, self-contained, has a clear deliverable, and can be expressed with concrete `success_criteria`.
+- **When NOT to delegate**: The task requires cross-branch synthesis, rapid iterative context-dependent probing, or dense reasoning that would be fragmented by hand-off.
+- When you delegate, provide `success_criteria`, a `budget`, and a `parent_expectation`. The sub-agent returns a **structured JSON result**.
+- Base your strategic decisions on the sub-agent's `status`, `confidence`, and `recommended_next_action`. Never re-delegate the same goal to the same agent without a new angle.
 
 ### Attack Graph Execution Workflow
 1. **Plan** — Build the DAG with `create_task`. Use `depend_on` to enforce causal order.
-2. **Delegate** — Run ready tasks concurrently by spawning sub-agents via `spawn_subagent`.
-3. **Evaluate** — Analyze the returned summaries. Check success/failure distribution.
-4. **Replan** (if needed) — On failed tasks, create alternative task branches with `create_task` and link them with `depend_on` to preserve dependency structure.
+2. **Execute** — For each ready task, choose direct execution or delegation based on fit. If delegating, use `spawn_subagent` with explicit `success_criteria`.
+3. **Evaluate** — Parse the sub-agent's **structured JSON result**. Check `status`, `confidence`, `key_findings`, and `recommended_next_action`.
+4. **Replan** (if needed) — On `blocked`, `failed`, or `budget_exhausted`, create alternative branches with `create_task`. On `wrong_agent`, pivot to a different agent or take over directly.
 5. **Iterate** — Go back to step 2 until the graph is fully resolved.
 
 ### Replanning Guidelines
@@ -263,13 +268,19 @@ _TOOL_GUIDELINES = """\
 
 _SUBAGENT_DELEGATION = """\
 ## Sub-Agent Delegation Rules
-You may delegate specialized tasks to sub-agents. Sub-agents are single-purpose tactical workers that execute one subtask and return a structured summary.
+You may delegate specialized tasks to sub-agents. Sub-agents are single-purpose tactical workers that execute one subtask and return a structured result.
 
 - Use `list_subagents` to discover available specialized agents.
 - Use `spawn_subagent` to delegate a specific task to a named sub-agent.
-- Provide the sub-agent with a **concise task goal** and **relevant context** extracted from the parent context window. Do not dump the entire conversation history.
+- **Before delegating**, answer: Why is this task better handled by a sub-agent? What are the concrete success criteria? What is the budget? If it fails, will you retry, replan, take over, or cancel?
+- Provide the sub-agent with a **concise goal**, **success_criteria**, **budget**, and **relevant context**. Do not dump the entire conversation history.
 - The sub-agent **cannot** spawn further sub-agents. It must complete the task directly.
-- Integrate the sub-agent's summary into your strategic plan before proceeding."""
+- **Re-delegation constraints** — You may NOT re-delegate to the same agent if the prior result was:
+  - `wrong_agent`
+  - `budget_exhausted` with no new context
+  - `blocked` with the blocker still unresolved
+  - explicitly recommended `parent_takeover`
+  If you still want to retry, you must supply a new evidence, hypothesis, tool permission, or success criterion."""
 
 _AGENT_MD_HEADER = """\
 ## AGENT.MD
@@ -281,18 +292,36 @@ The following specialized sub-agents are available for delegation. Each has its 
 
 _SUBAGENT_PREFIX = """\
 ## Identity
-You are {agent_name}, a specialized cybersecurity sub-agent. You execute a single assigned task with precision and return a structured summary. You do not have global context — rely only on the task goal and the parent context provided below."""
+You are {agent_name}, a specialized cybersecurity sub-agent. You execute a single assigned task within a strict budget and return a **structured JSON result**. You do not have global context — rely only on the task goal and the parent context provided below."""
 
 _SUBAGENT_RULES = """\
 ## Rules
 - **No further delegation** — You MUST NOT spawn additional sub-agents. Complete the task directly using your available tools.
+- **Plan first** — Before using any tool, write a brief execution plan (2-4 sentences) stating what you will try and what will signal completion or blocking.
 - **Tool precision** — Use the minimum set of tools needed. Avoid redundant or exploratory actions.
 - **Evidence-based** — Ground every claim in observable tool output.
-- **Concise reporting** — Return a structured summary with these sections:
-  1. **Key Findings** — What you discovered.
-  2. **Conclusion** — Whether the task succeeded, failed, or is partially complete.
-  3. **State** — Any artifacts, files, or data produced (with paths if relevant).
-  4. **Recommended Next Steps** — Specific follow-up actions for the parent agent."""
+- **Progress tracking** — After every tool call, ask yourself: "Did this produce new information?" If a turn produces no new evidence, no verified/negated hypothesis, no artifact, and no narrowed problem space, it is **no progress**.
+- **Stop early** — If you meet the success criteria, stop immediately and return the JSON result. Do not continue for "completeness". If you are blocked or have no progress for multiple turns, stop and report why.
+- **No repetition** — Never repeat the same tool call with the same arguments. If a call fails, change parameters or approach before retrying.
+- **JSON output contract** — Your final message MUST be a single valid JSON object matching the schema below. No markdown fences, no extra text outside the JSON.
+
+## Output Schema (MUST be valid JSON)
+```json
+{
+  "status": "completed|partial|blocked|failed|wrong_agent|needs_parent|budget_exhausted",
+  "summary": "One-sentence conclusion.",
+  "confidence": "low|medium|high",
+  "success_criteria_met": true,
+  "key_findings": ["..."],
+  "evidence": [{"type": "tool_output|http_response|file|observation", "value": "...", "source": "..."}],
+  "attempted_actions": [{"action": "...", "result": "success|failed|no_signal", "why": "..."}],
+  "artifacts": [{"path": "...", "description": "..."}],
+  "why_stopped": "success|blocked|no_progress|budget_exhausted|tool_limit|wrong_capability",
+  "recommended_next_action": "...",
+  "recommended_owner": "parent|same_agent|other_agent",
+  "next_agent": "optional"
+}
+```"""
 
 
 # =============================================================================
@@ -465,6 +494,9 @@ class PromptBuilder:
         task_goal: str,
         parent_context: str,
         tools_description: Optional[str] = None,
+        success_criteria: Optional[list[str]] = None,
+        budget: Optional[Any] = None,
+        stop_conditions: Optional[Any] = None,
     ) -> str:
         """
         Build a system prompt for a spawned sub-agent.
@@ -475,6 +507,9 @@ class PromptBuilder:
             task_goal: What the sub-agent should accomplish.
             parent_context: Relevant context extracted from the parent agent.
             tools_description: Optional formatted description of available tools.
+            success_criteria: List of criteria that define task completion.
+            budget: Budget object with max_turns, max_tool_calls, etc.
+            stop_conditions: StopConditions object with blocked_keywords, etc.
 
         Returns:
             Complete system prompt string for the sub-agent.
@@ -490,11 +525,36 @@ class PromptBuilder:
         if tools_description:
             parts.append(f"## Available Tools\n{tools_description}")
 
+        # --- Structured contract section ---
+        contract_lines: list[str] = []
+
+        if success_criteria:
+            contract_lines.append("### Success Criteria")
+            for idx, criterion in enumerate(success_criteria, 1):
+                contract_lines.append(f"{idx}. {criterion}")
+
+        if budget is not None:
+            contract_lines.append("### Budget")
+            contract_lines.append(f"- max_turns: {getattr(budget, 'max_turns', 'unlimited')}")
+            contract_lines.append(f"- max_tool_calls: {getattr(budget, 'max_tool_calls', 'unlimited')}")
+            contract_lines.append(f"- max_same_tool_retries: {getattr(budget, 'max_same_tool_retries', 'unlimited')}")
+            contract_lines.append(f"- max_no_progress_turns: {getattr(budget, 'max_no_progress_turns', 'unlimited')}")
+
+        if stop_conditions is not None:
+            blocked_keywords = getattr(stop_conditions, "blocked_keywords", None)
+            if blocked_keywords:
+                contract_lines.append("### Blocked Keywords")
+                contract_lines.append(", ".join(blocked_keywords))
+
+        if contract_lines:
+            parts.append("## Execution Contract\n" + "\n".join(contract_lines))
+
         parts.append(f"## Task\n{task_goal}")
         parts.append(f"## Context from Parent Agent\n{parent_context}")
         parts.append(
             "**Important**: You are a sub-agent. Do NOT spawn additional sub-agents. "
-            "Complete the assigned task directly using your available tools."
+            "Complete the assigned task directly using your available tools. "
+            "Your final message MUST be a single JSON object matching the schema above."
         )
 
         return "\n\n".join(parts)

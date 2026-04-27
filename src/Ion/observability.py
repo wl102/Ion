@@ -90,13 +90,22 @@ class ObservabilityLogger:
         with open(self._tool_log_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    def log_subagent_spawn(self, agent_name: str, task_goal: str, context: str):
+    def log_subagent_spawn(
+        self,
+        agent_name: str,
+        task_goal: str,
+        context: str,
+        budget: Optional[dict] = None,
+        task_type: Optional[str] = None,
+    ):
         entry = self._base_entry()
         entry.update({
             "event": "subagent_spawn",
             "agent_name": agent_name,
+            "task_type": task_type,
             "task_goal": task_goal[:1000],
             "context": context[:1000],
+            "budget": budget,
         })
         with open(self._subagent_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -107,6 +116,11 @@ class ObservabilityLogger:
         result: str,
         turns_used: int,
         finish_reason: Optional[str],
+        tool_calls: int = 0,
+        duplicate_calls: int = 0,
+        no_progress_turns: int = 0,
+        status: Optional[str] = None,
+        confidence: Optional[str] = None,
     ):
         entry = self._base_entry()
         entry.update({
@@ -115,6 +129,29 @@ class ObservabilityLogger:
             "result": result[:2000],
             "turns_used": turns_used,
             "finish_reason": finish_reason,
+            "tool_calls": tool_calls,
+            "duplicate_calls": duplicate_calls,
+            "no_progress_turns": no_progress_turns,
+            "status": status,
+            "confidence": confidence,
+        })
+        with open(self._subagent_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    def log_redelegation(
+        self,
+        agent_name: str,
+        prior_status: str,
+        new_goal: str,
+        has_new_delta: bool,
+    ):
+        entry = self._base_entry()
+        entry.update({
+            "event": "redelegation",
+            "agent_name": agent_name,
+            "prior_status": prior_status,
+            "new_goal": new_goal[:500],
+            "has_new_delta": has_new_delta,
         })
         with open(self._subagent_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
