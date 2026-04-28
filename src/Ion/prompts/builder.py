@@ -604,19 +604,27 @@ class PromptBuilder:
 
     @staticmethod
     def build_skills_context(skill_registry) -> dict[str, Any]:
-        """Build runtime context variables from a SkillRegistry instance."""
-        catalog = skill_registry.get_catalog()
-        if not catalog:
-            return {
-                "available_skills": None,
-                "active_skills": None,
-            }
+        """Build runtime context variables from a SkillRegistry instance.
 
-        skill_lines = [f"- {s['name']}: {s['description']}" for s in catalog]
-        return {
-            "available_skills": "\n".join(skill_lines),
-            "active_skills": None,
-        }
+        Returns both the available skills catalog (Level 0) and the
+        currently active skills' full content for prompt injection.
+        """
+        catalog = skill_registry.get_catalog()
+        result: dict[str, Any] = {}
+
+        if catalog:
+            skill_lines = [f"- {s['name']}: {s['description']}" for s in catalog]
+            result["available_skills"] = "\n".join(skill_lines)
+        else:
+            result["available_skills"] = None
+
+        active_xml = skill_registry.get_active_skills_xml()
+        if active_xml:
+            result["active_skills"] = active_xml
+        else:
+            result["active_skills"] = None
+
+        return result
 
     @staticmethod
     def build_tools_context(tools_schema: list[dict]) -> dict[str, Any]:

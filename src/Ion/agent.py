@@ -127,8 +127,6 @@ class PentestAgent:
         subagent_catalog = self.agent_registry.get_catalog_xml()
         if subagent_catalog:
             ctx["subagent_catalog"] = subagent_catalog
-        # Inject active skills content if any were activated during the session.
-        # SkillRegistry currently does not track active state; we surface catalog instead.
         return ctx
 
     def _build_system_prompt(

