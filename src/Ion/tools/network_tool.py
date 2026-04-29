@@ -58,7 +58,7 @@ async def _http_request(
             if cookies:
                 cookie_info = "\n\nActive Cookies (shared jar):\n"
                 for name, value, domain, path in cookies:
-                    cookie_info += f"  {name}={value[:50]}... (domain={domain}, path={path})\n"
+                    cookie_info += f"  {name}={value} (domain={domain}, path={path})\n"
 
         output = (
             f"Status: {resp.status_code}\n"

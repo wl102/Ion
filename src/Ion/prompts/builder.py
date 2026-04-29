@@ -167,6 +167,12 @@ _DOMAIN_KNOWLEDGE_CTF = """\
   - One PHP source file read via LFI can expose the entire attack surface of the application.
   - One SQL injection result with database schema information can lead directly to flag extraction.
   - **Depth over breadth**: 5 carefully exploited findings beat 50 surface-level scan results.
+- **Enumeration-First Doctrine** — When you hold valid credentials and an active session, **systematic data enumeration is the highest-ROI action** before attempting advanced attacks:
+  1. **Enumerate all visible data first** — User profile, order/message history, file listings, config panels. Read every page's full source.
+  2. **Fuzz all numeric ID endpoints** — Orders, receipts, messages, files. Scan ranges of ±500–1000 around discovered IDs. The flag is often hidden in a data item you haven't looked at yet.
+  3. **Read full content of every retrieved item** — Receipts, documents, API responses. Truncated output is your enemy; always request the full payload.
+  4. **Only after enumeration is exhausted**, attempt advanced attacks (session forgery, SSTI, deserialization, RCE).
+  - **Rule of thumb**: If you have a valid session, 70% of CTF flags are found by enumeration, 30% by exploitation.
 - **Chain reactions** — In CTF, every piece of information should trigger a deeper search:
   - Discovered a username? → Try credential stuffing, check home dir, check SSH keys.
   - Found a DB table name? → Dump it, look for password hashes, look for flag columns.
@@ -279,16 +285,22 @@ _TASK_PATH_PLANNING_BASE = """\
 - Terminate planning when the user objective is achieved or all reachable paths are exhausted."""
 
 _TASK_PATH_PLANNING_CTF = """\
-### CTF Mode: Information-Driven Depth-First Execution
-- In CTF mode, **abandon BFS as soon as you have actionable intelligence**.
-- When a recon task yields source code, credentials, database info, or internal service details, immediately create exploitation child tasks and prioritize them over all pending recon tasks.
-- **Ready task ordering**: Tasks with higher `information_score` (derived from how much concrete intelligence their parent provided) are executed first.
-- A completed task that produced source code or credentials should spawn 3-5 deep exploitation tasks before any sibling recon tasks run.
-- **Example flow**:
-  1. Recon: discover web app endpoints → `[H1] LFI test`
-  2. LFI succeeds, reads `index.php` source → Immediately spawn: `[H1a] Audit source for SQLi`, `[H1b] Audit source for deserialization`, `[H1c] Audit source for file upload`
-  3. Only after these deep branches are exhausted, return to breadth recon.
-- **Golden rule**: The flag is almost never found by scanning. It is found by exploiting the 1% of intelligence that reveals the vulnerability. Go deep first."""
+### CTF Mode: Information-Driven Execution
+- In CTF mode, **abandon BFS as soon as you have actionable intelligence** — but with a critical exception:
+  - If the intelligence is **a valid session/credential**, do NOT immediately jump to advanced exploitation (session cracking, SSTI, RCE). Instead, **first perform systematic data enumeration** with that session.
+  - Only if enumeration yields no flag, then pivot to advanced exploitation.
+- **Ready task ordering**:
+  1. Tasks that perform **data enumeration with a valid session** (highest priority when session exists)
+  2. Tasks with higher `information_score` (derived from concrete intelligence)
+  3. Reconnaissance tasks (lowest priority once authenticated)
+- **Example flow (authenticated)**:
+  1. Login succeeds → `[H1] Enumerate all user data (profile, orders, messages)`
+  2. `[H1a] Fuzz order IDs ±1000` → `[H1b] Fuzz message IDs` → `[H1c] Check all receipt content`
+  3. If enumeration yields no flag → `[H2] Audit session for forgery` → `[H3] Test SSTI on discovered endpoints`
+- **Example flow (unauthenticated)**:
+  1. Recon: discover web app → `[H1] LFI test` → `[H2] SQLi test`
+  2. LFI succeeds, reads `index.php` source → Immediately spawn: `[H2a] Audit source for SQLi`, `[H2b] Audit source for deserialization`
+- **Golden rule**: The flag is found in one of two places — (a) data you haven't looked at yet, or (b) the 1% vulnerability that reveals hidden data. Enumerate first, exploit second."""
 
 _TOOL_GUIDELINES = """\
 ## Tool Usage Guidelines
@@ -301,13 +313,21 @@ _TOOL_GUIDELINES = """\
 - Chain tool calls only when the output of one is required as input to the next.
 - Never call tools one-by-one when batch or concurrent delegation mechanisms are available.
 
+### Tool Selection Priority
+- **Web requests** — Always prefer `http_request` over `bash`+`curl`. It handles cookies, redirects, and headers automatically. Use `bash`+`curl` only when you need loops, conditional logic, or complex piping.
+- **Probing & enumeration** — Prefer `python_exec` over external scanners (`dirsearch`, `ffuf`, `gobuster`). Python scripts are reliable, portable, and give you full control over wordlists, rate limits, and output parsing. External tools often have missing dependencies or incompatible versions in the execution environment.
+- **Shell operations** — Use `bash` for one-off commands (nmap, file listings). Use `python_exec` for anything requiring state, loops, or data processing.
+
 ### Tool Failure Handling
 - If a tool call fails with an error, **analyze the error before retrying**. Common failure modes:
-  - Missing binary / command not found → Use Python scripts as fallback, or skip and report.
+  - Missing binary / command not found → **Use `python_exec` as the primary fallback**. Write a Python script with `requests` or `httpx` instead of relying on external scanners.
   - Wrong arguments / invalid syntax → Fix the arguments, do not retry identically.
   - Permission denied → Document the blocker and pivot to alternative approaches.
   - Timeout / resource exhaustion → Reduce scope and retry with smaller inputs.
-- **Do not repeatedly invoke the same external tool** if it has failed 2+ times. Switch to a different approach or tool.
+- **Do not repeatedly invoke the same external tool** if it has failed 2+ times. Switch to `python_exec` or a different approach immediately.
+
+### Python Environment Note
+- The Python interpreter runs in a virtual environment. When writing scripts that need additional packages, prefer using the standard library (`urllib`, `http.client`, `json`, `re`, `itertools`). If a third-party package is essential, install it via the venv path before importing.
 
 ### Delegation Strategy
 - **When to delegate**: The task is highly specialized, self-contained, has a clear deliverable, and can be expressed with concrete `success_criteria`.
