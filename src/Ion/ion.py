@@ -451,6 +451,10 @@ def _has_progress(state: LoopState, tracker: SubagentLoopTracker) -> bool:
             # HTTP response variations that indicate different behavior
             '"status": 200' in content or '"status": 500' in content,
             '"status": 403' in content or '"status": 401' in content,
+            # IDOR / enumeration: content-length differences signal unauthorized data access
+            "content-length" in content_lower and ("different" in content_lower or "anomal" in content_lower or "outlier" in content_lower),
+            "length=" in content_lower and ("diff" in content_lower or "vary" in content_lower or "cluster" in content_lower),
+            "status: 200" in content_lower and "len=" in content_lower,  # enumeration output listing HTTP responses
             # File content / source code
             "<?php" in content_lower,
             "import " in content_lower,
@@ -491,7 +495,7 @@ def _has_progress(state: LoopState, tracker: SubagentLoopTracker) -> bool:
         if len(content) < 30:
             return False
         # Check if assistant is reporting findings or just planning
-        finding_keywords = ["found", "discovered", "confirmed", "identified", "extracted", "successful"]
+        finding_keywords = ["found", "discovered", "confirmed", "identified", "extracted", "successful", "different length", "content-length", "anomaly", "outlier", "unauthorized"]
         if any(kw in content.lower() for kw in finding_keywords):
             return True
         return True

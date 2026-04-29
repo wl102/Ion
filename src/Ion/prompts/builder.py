@@ -145,7 +145,14 @@ _DOMAIN_KNOWLEDGE_SECURITY = """\
 2. **SQL Injection** — Union-based, Boolean blind, Time-based blind, Error-based. Bypass via case mixing, comments `/**/`, double-write.
 3. **File-Related** — LFI (`../../../etc/passwd`, PHP wrappers), File Upload (extension bypass, Content-Type forgery), Path Traversal.
 4. **SSRF** — Protocol pivot (`file://`, `gopher://`, `dict://`), IP obfuscation (`0x7f000001`, `[::1]`), cloud metadata endpoints.
-5. **Authentication & Authorization** — Weak credentials, JWT algorithm confusion (`none`, `HS256`→`RS256`), session fixation, IDOR. IDOR: fuzz numeric IDs with ±10 sequential values and common patterns (1,2,3,100,1000). Check every endpoint that returns user-specific data after authentication.
+5. **Authentication & Authorization** — Weak credentials, JWT algorithm confusion (`none`, `HS256`→`RS256`), session fixation, IDOR.
+   - **IDOR Systematic Fuzzing Rule**: Every numeric or UUID parameter you encounter MUST be fuzzed before moving on. This includes `user_id`, `order_id`, `receipt_id`, `file_id`, `message_id`, etc.
+   - **Fuzzing strategy**: For each ID parameter, test:
+     a) **Sequential neighbors**: ±20 around the discovered value (e.g., if user_id=10032, test 10010-10050)
+     b) **Small integers**: 1, 2, 3, 4, 5, 10, 50, 100, 500, 1000, 9999
+     c) **Boundary values**: 0, -1, MAX_INT
+   - **Anomaly detection**: Group responses by HTTP status + content-length. Any response with a DIFFERENT length from the majority is a potential hit — read its full content immediately. Do not discard "empty-looking" or "template-only" responses without reading the complete body.
+   - **Multi-parameter IDOR**: If an endpoint has multiple ID parameters (e.g., `/order/{order_id}/receipt` while logged in as user_id=X), fuzz ALL of them, including the implicit user context in the session cookie.
 6. **Deserialization** — PHP `unserialize()` POP chains, Python `pickle.loads()`, Java gadget chains.
 7. **SSTI** — Engine-specific probes, sandbox escape via module import/reflection.
 
@@ -167,12 +174,22 @@ _DOMAIN_KNOWLEDGE_CTF = """\
   - One PHP source file read via LFI can expose the entire attack surface of the application.
   - One SQL injection result with database schema information can lead directly to flag extraction.
   - **Depth over breadth**: 5 carefully exploited findings beat 50 surface-level scan results.
-- **Enumeration-First Doctrine** — When you hold valid credentials and an active session, **systematic data enumeration is the highest-ROI action** before attempting advanced attacks:
+- **Enumeration-First Doctrine (HARD CONSTRAINT)** — When you hold valid credentials and an active session, **you are FORBIDDEN from attempting advanced attacks until enumeration is provably complete**:
   1. **Enumerate all visible data first** — User profile, order/message history, file listings, config panels. Read every page's full source.
-  2. **Fuzz all numeric ID endpoints** — Orders, receipts, messages, files. Scan ranges of ±500–1000 around discovered IDs. The flag is often hidden in a data item you haven't looked at yet.
+  2. **Fuzz ALL numeric ID endpoints exhaustively** — This is the #1 source of CTF flags. For every ID you see (user_id, order_id, receipt_id, file_id, message_id, etc.):
+     - Scan ±500 around discovered IDs with step=1 (not broad ranges like 200000-400000)
+     - Always test small integers: 1, 2, 3, 4, 5, 10, 50, 100, 500, 1000
+     - Group responses by content-length. ANY response with a different length from the baseline is a potential unauthorized data access — read it fully.
+     - Do NOT dismiss "empty" or "template-only" responses. Read every byte of anomalous responses.
   3. **Read full content of every retrieved item** — Receipts, documents, API responses. Truncated output is your enemy; always request the full payload.
-  4. **Only after enumeration is exhausted**, attempt advanced attacks (session forgery, SSTI, deserialization, RCE).
+  4. **Enumeration completion checklist** (MUST pass ALL before advanced attacks):
+     - [ ] All visible pages accessed and full HTML source inspected (including hidden fields, HTML comments, inline scripts)
+     - [ ] All numeric IDs discovered in any response are fuzzed with ±500 neighbors + small integers
+     - [ ] All ID-based endpoints tested with anomalous IDs, and any response-length outliers fully read
+     - [ ] All static assets (JS, CSS) fetched and grepped for hardcoded secrets, API endpoints, credentials
+  5. **Only after ALL checklist items pass**, attempt advanced attacks (session forgery, SSTI, deserialization, RCE).
   - **Rule of thumb**: If you have a valid session, 70% of CTF flags are found by enumeration, 30% by exploitation.
+  - **Violation consequence**: Attempting session cracking, SSTI, or SQL injection before completing the checklist wastes tokens and misses the flag.
 - **Chain reactions** — In CTF, every piece of information should trigger a deeper search:
   - Discovered a username? → Try credential stuffing, check home dir, check SSH keys.
   - Found a DB table name? → Dump it, look for password hashes, look for flag columns.
@@ -288,19 +305,29 @@ _TASK_PATH_PLANNING_CTF = """\
 ### CTF Mode: Information-Driven Execution
 - In CTF mode, **abandon BFS as soon as you have actionable intelligence** — but with a critical exception:
   - If the intelligence is **a valid session/credential**, do NOT immediately jump to advanced exploitation (session cracking, SSTI, RCE). Instead, **first perform systematic data enumeration** with that session.
+  - **HARD RULE**: You MUST complete the Enumeration Completion Checklist (defined in Domain Knowledge) before creating any session-forgery, SSTI, SQLi, or RCE tasks.
   - Only if enumeration yields no flag, then pivot to advanced exploitation.
 - **Ready task ordering**:
   1. Tasks that perform **data enumeration with a valid session** (highest priority when session exists)
-  2. Tasks with higher `information_score` (derived from concrete intelligence)
-  3. Reconnaissance tasks (lowest priority once authenticated)
+  2. Tasks that **fuzz ID-based endpoints** (second priority — this is the most common CTF flag location)
+  3. Tasks with higher `information_score` (derived from concrete intelligence)
+  4. Reconnaissance tasks (lowest priority once authenticated)
+- **IDOR Fuzzing Task Design** (MUST follow this pattern):
+  1. **Baseline**: Record the content-length of a known-valid response (e.g., your own order receipt).
+  2. **Neighbor scan**: Test ±500 around each discovered ID with step=1. Record status code + content-length for each.
+  3. **Small-integer scan**: Test IDs 1-100, 500, 1000, 9999. Record responses.
+  4. **Anomaly analysis**: Group all responses by (status, length). Any group with a DIFFERENT length from the baseline MUST have its full content read and analyzed.
+  5. **Report**: Return the full body of every anomalous response, not just "found X orders".
 - **Example flow (authenticated)**:
-  1. Login succeeds → `[H1] Enumerate all user data (profile, orders, messages)`
-  2. `[H1a] Fuzz order IDs ±1000` → `[H1b] Fuzz message IDs` → `[H1c] Check all receipt content`
-  3. If enumeration yields no flag → `[H2] Audit session for forgery` → `[H3] Test SSTI on discovered endpoints`
+  1. Login succeeds → `[H1] Enumerate all user data (profile, orders, messages)` → Read full source of every page
+  2. `[H1a] Fuzz order IDs ±500 with length-clustering analysis` → `[H1b] Fuzz user_id ±20` → `[H1c] Fuzz any other discovered IDs`
+  3. `[H1d] Read full content of every anomalous response` (different length/status)
+  4. **CHECKLIST PASS?** → If yes: `[H2] Audit session for forgery` → `[H3] Test SSTI on discovered endpoints`
+  5. **CHECKLIST FAIL?** → Go back to step 2 with broader ranges or different ID types.
 - **Example flow (unauthenticated)**:
   1. Recon: discover web app → `[H1] LFI test` → `[H2] SQLi test`
   2. LFI succeeds, reads `index.php` source → Immediately spawn: `[H2a] Audit source for SQLi`, `[H2b] Audit source for deserialization`
-- **Golden rule**: The flag is found in one of two places — (a) data you haven't looked at yet, or (b) the 1% vulnerability that reveals hidden data. Enumerate first, exploit second."""
+- **Golden rule**: The flag is found in one of two places — (a) data you haven't looked at yet (usually IDOR), or (b) the 1% vulnerability that reveals hidden data. Enumerate first, exploit second."""
 
 _TOOL_GUIDELINES = """\
 ## Tool Usage Guidelines
