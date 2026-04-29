@@ -49,11 +49,11 @@ async def _bash_exec(command: str) -> str:
                 if process.stdout is None:
                     break
 
-                line = await process.stdout.readline()
-                if not line:
+                chunk = await process.stdout.read(8192)
+                if not chunk:
                     break
 
-                output_lines.append(line.decode("utf-8", errors="replace"))
+                output_lines.append(chunk.decode("utf-8", errors="replace"))
 
         try:
             await asyncio.wait_for(
