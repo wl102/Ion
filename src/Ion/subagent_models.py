@@ -35,6 +35,9 @@ class WhyStopped(str, Enum):
     TOOL_LIMIT = "tool_limit"
     WRONG_CAPABILITY = "wrong_capability"
     MAX_TURNS = "max_turns"
+    SAME_ERROR_LIMIT = "same_error_limit"
+    LOW_SUCCESS_RATE = "low_success_rate"
+    STOP_CONDITION = "stop_condition"
 
 
 class RecommendedOwner(str, Enum):
@@ -65,6 +68,15 @@ class Budget(BaseModel):
     )
     max_no_progress_turns: int = Field(
         default=3, description="Max consecutive turns without new information"
+    )
+    max_same_error_count: int = Field(
+        default=2, description="Max consecutive identical errors before stopping"
+    )
+    min_success_rate: float = Field(
+        default=0.15, description="Stop if success rate falls below this threshold after min_sample_size attempts"
+    )
+    min_sample_size: int = Field(
+        default=5, description="Minimum attempts before checking success rate"
     )
 
 
@@ -218,6 +230,7 @@ class SubagentLoopTracker(BaseModel):
     last_error_signature: str = ""
     status_transitions: list[str] = Field(default_factory=list)
     has_new_information_last_turn: bool = False
+    attempt_results: list[str] = Field(default_factory=list)
 
     def record_tool_call(self, name: str, arguments: dict):
         self.tool_call_count += 1
@@ -245,8 +258,38 @@ class SubagentLoopTracker(BaseModel):
             self.no_progress_turn_count += 1
             self.has_new_information_last_turn = False
 
-    def check_budget(self, budget: Budget) -> Optional[str]:
-        """Return stop reason if budget exceeded, else None."""
+    def record_attempt_result(self, result: str):
+        """Record an attempt result: 'success', 'failed', or 'no_signal'."""
+        self.attempt_results.append(result)
+
+    def get_success_rate(self, window: int = 10) -> float:
+        """Calculate success rate over the last N attempts."""
+        recent = self.attempt_results[-window:] if self.attempt_results else []
+        if not recent:
+            return 0.0
+        successes = sum(1 for r in recent if r == "success")
+        return successes / len(recent)
+
+    def is_low_success_rate(self, budget: Budget) -> bool:
+        """Check if success rate is below threshold after minimum sample size."""
+        if budget.min_success_rate <= 0:
+            return False
+        if len(self.attempt_results) < budget.min_sample_size:
+            return False
+        return self.get_success_rate(window=budget.min_sample_size) < budget.min_success_rate
+
+    def check_blocked_keywords(self, content: str, blocked_keywords: list[str]) -> Optional[str]:
+        """Check if content contains any blocked keywords."""
+        if not blocked_keywords or not content:
+            return None
+        content_lower = content.lower()
+        for keyword in blocked_keywords:
+            if keyword.lower() in content_lower:
+                return f"blocked_keyword:{keyword}"
+        return None
+
+    def check_budget(self, budget: Budget, latest_content: str = "", stop_conditions: Optional[Any] = None) -> Optional[str]:
+        """Return stop reason if budget exceeded or stop conditions met, else None."""
         if budget.max_tool_calls > 0 and self.tool_call_count >= budget.max_tool_calls:
             return "tool_limit"
         if budget.max_same_tool_retries > 0:
@@ -258,4 +301,20 @@ class SubagentLoopTracker(BaseModel):
                     return "duplicate_tool_call"
         if budget.max_no_progress_turns > 0 and self.no_progress_turn_count >= budget.max_no_progress_turns:
             return "no_progress"
+        if budget.max_same_error_count > 0 and self.consecutive_same_error_count >= budget.max_same_error_count:
+            return "same_error_limit"
+        if self.is_low_success_rate(budget):
+            rate = self.get_success_rate(window=budget.min_sample_size)
+            return f"low_success_rate:{rate:.0%}"
+
+        # Check stop_conditions if provided
+        if stop_conditions is not None:
+            blocked_keywords = getattr(stop_conditions, "blocked_keywords", None)
+            blocked = self.check_blocked_keywords(latest_content, blocked_keywords or [])
+            if blocked:
+                return blocked
+            max_same_error = getattr(stop_conditions, "max_same_error_count", 0)
+            if max_same_error > 0 and self.consecutive_same_error_count >= max_same_error:
+                return "stop_condition_same_error"
+
         return None

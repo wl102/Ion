@@ -1,12 +1,13 @@
 import json
 import re
 import time
-from typing import Optional, Literal
+from typing import Any, Optional, Literal
 
 from pydantic import BaseModel
 from Ion.tools.registry import dispatch
 from Ion.subagent_models import (
     Budget,
+    StopConditions,
     SubagentLoopTracker,
     SubagentResult,
     SubagentStatus,
@@ -197,7 +198,12 @@ Wrap your summary in <summary></summary> tags.""",
 
 
 def run_one_turn(
-    client, model_id: str, state: LoopState, tools: list[dict], logger=None, agent_name: str = "root"
+    client,
+    model_id: str,
+    state: LoopState,
+    tools: list[dict],
+    logger=None,
+    agent_name: str = "root",
 ):
     prefix = f"[SubAgent: {agent_name}] " if agent_name != "root" else ""
     prefix_printed = False
@@ -222,9 +228,11 @@ def run_one_turn(
         )
 
     content_parts = []
+    reasoning_content_parts = []
     tool_calls_map = {}
     finish_reason = None
     usage = None
+    reasoning = False
 
     for chunk in response:
         choice = chunk.choices[0] if chunk.choices else None
@@ -242,9 +250,11 @@ def run_one_turn(
                 prefix_printed = True
             text = delta.content
             content_parts.append(text)
+            if reasoning:
+                reasoning = False
+                print("\n</think>\n")
             print(text, end="", flush=True)
-
-        if delta and delta.tool_calls:
+        elif delta and delta.tool_calls:
             for tc_delta in delta.tool_calls:
                 idx = tc_delta.index
                 if idx not in tool_calls_map:
@@ -263,19 +273,33 @@ def run_one_turn(
                         tc["function"]["name"] = tc_delta.function.name
                     if tc_delta.function.arguments:
                         tc["function"]["arguments"] += tc_delta.function.arguments
+        elif delta and delta.reasoning_content:
+            if prefix and not prefix_printed:
+                print(prefix, end="", flush=True)
+                prefix_printed = True
+            text = delta.reasoning_content
+            reasoning_content_parts.append(text)
+            if not reasoning:
+                reasoning = True
+                print("<think>\n")
+            print(text, end="", flush=True)
 
         if choice.finish_reason is not None:
             finish_reason = choice.finish_reason
 
+    if reasoning_content_parts:
+        print()
     if content_parts:
         print()
 
+    reasoning_content = "".join(reasoning_content_parts)
     content = "".join(content_parts)
     tool_calls_data = list(tool_calls_map.values())
 
     assistant_message = {
         "role": "assistant",
         "content": content or None,
+        "reasoning_content": reasoning_content or None,
     }
     if tool_calls_data:
         assistant_message["tool_calls"] = tool_calls_data
@@ -400,17 +424,63 @@ def _has_progress(state: LoopState, tracker: SubagentLoopTracker) -> bool:
     last_msg = state.messages[-1]
     role = last_msg.get("role", "")
 
-    # If the last message is a tool result, check if it's an error or has content
+    # If the last message is a tool result, deeply analyze for progress
     if role == "tool":
         content = last_msg.get("content", "")
-        if not content or len(content) < 10:
+        if not content or len(content) < 5:
+            tracker.record_attempt_result("no_signal")
             return False
+
+        content_lower = content.lower()
+
         # Check for error patterns
-        if content.startswith('{"error"') or "error" in content[:50].lower():
+        is_error = content.startswith('{"error"') or "error" in content[:100].lower()
+        if is_error:
             tracker.record_error(content)
+            tracker.record_attempt_result("failed")
             # An error is information if it's different from previous errors
             return tracker.consecutive_same_error_count <= 1
-        return True
+
+        # Check for signals of genuine progress
+        progress_signals = [
+            # New data discovered
+            "flag{" in content_lower,
+            "flag is" in content_lower,
+            "password" in content_lower,
+            "secret" in content_lower,
+            # HTTP response variations that indicate different behavior
+            '"status": 200' in content or '"status": 500' in content,
+            '"status": 403' in content or '"status": 401' in content,
+            # File content / source code
+            "<?php" in content_lower,
+            "import " in content_lower,
+            "config" in content_lower,
+            # Database / SQL indicators
+            "mysql" in content_lower,
+            "sqlite" in content_lower,
+            "table" in content_lower,
+            "column" in content_lower,
+            # Successful exploitation signs
+            "root@" in content_lower,
+            "uid=" in content_lower,
+        ]
+
+        if any(progress_signals):
+            tracker.record_attempt_result("success")
+            return True
+
+        # Check if content is substantially different from previous tool results
+        content_sig = content[:300]
+        recent_sigs = []
+        for msg in state.messages[:-1]:
+            if msg.get("role") == "tool":
+                recent_sigs.append(msg.get("content", "")[:300])
+        if recent_sigs and content_sig not in recent_sigs:
+            tracker.record_attempt_result("success")
+            return True
+
+        tracker.record_attempt_result("no_signal")
+        return False
 
     # If assistant produced content (not just tool calls), check for novelty
     if role == "assistant":
@@ -420,9 +490,32 @@ def _has_progress(state: LoopState, tracker: SubagentLoopTracker) -> bool:
         # Very short or repetitive summaries indicate no progress
         if len(content) < 30:
             return False
+        # Check if assistant is reporting findings or just planning
+        finding_keywords = ["found", "discovered", "confirmed", "identified", "extracted", "successful"]
+        if any(kw in content.lower() for kw in finding_keywords):
+            return True
         return True
 
     return True
+
+
+def _map_violation_to_why(violation: str) -> WhyStopped:
+    """Map budget violation string to WhyStopped enum."""
+    if violation == "tool_limit":
+        return WhyStopped.TOOL_LIMIT
+    if violation == "no_progress":
+        return WhyStopped.NO_PROGRESS
+    if violation == "duplicate_tool_call":
+        return WhyStopped.BLOCKED
+    if violation == "same_error_limit":
+        return WhyStopped.SAME_ERROR_LIMIT
+    if violation.startswith("low_success_rate"):
+        return WhyStopped.LOW_SUCCESS_RATE
+    if violation.startswith("blocked_keyword"):
+        return WhyStopped.STOP_CONDITION
+    if violation == "stop_condition_same_error":
+        return WhyStopped.STOP_CONDITION
+    return WhyStopped.BUDGET_EXHAUSTED
 
 
 def run_subagent_loop(
@@ -434,6 +527,7 @@ def run_subagent_loop(
     logger=None,
     on_before_turn=None,
     agent_name: str = "subagent",
+    stop_conditions: Optional[Any] = None,
 ) -> SubagentResult:
     """
     Run a controlled sub-agent loop with budget enforcement and anti-loop guards.
@@ -479,7 +573,9 @@ def run_subagent_loop(
                         tname = fn.get("name", "")
                         targs = fn.get("arguments", "{}")
                         try:
-                            args = json.loads(targs) if isinstance(targs, str) else targs
+                            args = (
+                                json.loads(targs) if isinstance(targs, str) else targs
+                            )
                         except Exception:
                             args = {}
                         tracker.record_tool_call(tname, args)
@@ -489,16 +585,17 @@ def run_subagent_loop(
             tracker.mark_progress(has_progress)
 
             # --- budget checks (post-turn) ---
-            budget_violation = tracker.check_budget(budget)
+            latest_content = ""
+            if state.messages:
+                latest_content = state.messages[-1].get("content", "") or ""
+            budget_violation = tracker.check_budget(
+                budget, latest_content=latest_content, stop_conditions=stop_conditions
+            )
             if budget_violation:
                 tracker.status_transitions.append(f"budget:{budget_violation}")
                 _inject_termination_message(state, budget_violation)
                 _force_final_turn(client, model_id, state, tools, logger, agent_name)
-                why = (
-                    WhyStopped.TOOL_LIMIT
-                    if budget_violation == "tool_limit"
-                    else WhyStopped.NO_PROGRESS
-                )
+                why = _map_violation_to_why(budget_violation)
                 return _extract_result(state, tracker, why)
 
             # --- post-turn length handling ---
@@ -578,5 +675,15 @@ def _extract_result(
         result.status = SubagentStatus.BUDGET_EXHAUSTED
     elif result.status == SubagentStatus.FAILED and why == WhyStopped.NO_PROGRESS:
         result.status = SubagentStatus.BLOCKED
+    elif result.status == SubagentStatus.FAILED and why == WhyStopped.SAME_ERROR_LIMIT:
+        result.status = SubagentStatus.BLOCKED
+    elif result.status == SubagentStatus.FAILED and why == WhyStopped.LOW_SUCCESS_RATE:
+        result.status = SubagentStatus.BLOCKED
+    elif result.status == SubagentStatus.FAILED and why == WhyStopped.STOP_CONDITION:
+        result.status = SubagentStatus.BLOCKED
+
+    # If still failed but we have key findings, mark as partial
+    if result.status == SubagentStatus.FAILED and result.key_findings:
+        result.status = SubagentStatus.PARTIAL
 
     return result

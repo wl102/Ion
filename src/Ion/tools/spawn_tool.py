@@ -247,6 +247,7 @@ def _run_subagent(
             budget=req.budget,
             logger=sub_logger,
             agent_name=agent_name,
+            stop_conditions=req.stop_conditions,
         )
     except Exception as exc:
         sub_logger.log_subagent_finish(
@@ -342,6 +343,9 @@ RUN_SUBAGENT_SCHEMA = {
                         "max_tool_calls": {"type": "integer"},
                         "max_same_tool_retries": {"type": "integer"},
                         "max_no_progress_turns": {"type": "integer"},
+                        "max_same_error_count": {"type": "integer"},
+                        "min_success_rate": {"type": "number"},
+                        "min_sample_size": {"type": "integer"},
                     },
                 },
                 "stop_conditions": {

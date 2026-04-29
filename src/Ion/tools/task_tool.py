@@ -34,6 +34,11 @@ class Task(BaseModel):
     on_failure: str = Field(default="replan", pattern="^(retry|skip|replan)$")
     attempt_count: int = 0
     max_attempts: int = 1
+    # information_score: higher = task was created based on richer intelligence
+    # Used for DFS prioritization in CTF mode (0-10, default 0)
+    information_score: int = Field(default=0, ge=0, le=10)
+    # intelligence_source: brief note on what finding triggered this task
+    intelligence_source: str = ""
 
     def model_post_init(self, __context):
         self.updated_at = datetime.now().isoformat()
@@ -64,16 +69,21 @@ class TaskManager:
         return [t for t in self._tasks.values() if t.status == TaskStatus.FAILED]
 
     def get_ready_tasks(self) -> list[Task]:
-        """Return tasks that are pending and have all dependencies completed."""
+        """Return tasks that are pending and have all dependencies completed.
+
+        Sorted by information_score descending so high-intelligence tasks
+        (source-code exploitation, credential-based attacks) run first.
+        """
         completed_ids = {
             t.id for t in self._tasks.values() if t.status == TaskStatus.COMPLETED
         }
-        return [
+        ready = [
             t
             for t in self._tasks.values()
             if t.status == TaskStatus.PENDING
             and all(dep in completed_ids for dep in t.depend_on)
         ]
+        return sorted(ready, key=lambda t: t.information_score, reverse=True)
 
     def update_status(
         self, task_id: str, status: TaskStatus, result: Optional[str] = None
@@ -160,7 +170,9 @@ task_manager = TaskManager()
 # ---------------------------------------------------------------------------
 
 
-def _create_task(task_manager, name, description, depend_on, on_failure):
+def _create_task(
+    task_manager, name, description, depend_on, on_failure, information_score, intelligence_source
+):
     if depend_on is None:
         depend_on = []
     elif isinstance(depend_on, str):
@@ -172,6 +184,8 @@ def _create_task(task_manager, name, description, depend_on, on_failure):
         description=description,
         depend_on=depend_on,
         on_failure=on_failure,
+        information_score=information_score or 0,
+        intelligence_source=intelligence_source or "",
     )
     task_manager.add_task(task)
     return tool_result(success=True, output=f"Task created: {task.id} - {task.name}")
@@ -203,7 +217,11 @@ def _list_tasks(task_manager):
     lines = []
     for t in tasks:
         deps = ", ".join(t.depend_on) if t.depend_on else "none"
-        lines.append(f"{t.id}: [{t.status.value}] {t.name} (deps: {deps})")
+        score_info = f" [info_score: {t.information_score}]" if t.information_score > 0 else ""
+        intel_info = f" ← {t.intelligence_source[:60]}" if t.intelligence_source else ""
+        lines.append(
+            f"{t.id}: [{t.status.value}] {t.name}{score_info} (deps: {deps}){intel_info}"
+        )
     return tool_result(success=True, output="\n".join(lines))
 
 
@@ -223,8 +241,12 @@ def register_task_tools(task_manager):
         name="create_task",
         toolset="task",
         schema=CREATE_TASK_SCHEMA,
-        handler=lambda name, description, depend_on=None, on_failure="replan", **kw: (
-            _create_task(task_manager, name, description, depend_on, on_failure)
+        handler=lambda name, description, depend_on=None, on_failure="replan",
+        information_score=None, intelligence_source=None, **kw: (
+            _create_task(
+                task_manager, name, description, depend_on, on_failure,
+                information_score, intelligence_source
+            )
         ),
         description="Create a new task in the attack graph.",
         emoji="📋",
@@ -277,7 +299,12 @@ CREATE_TASK_SCHEMA = {
     "type": "function",
     "function": {
         "name": "create_task",
-        "description": "Create a new task in the attack graph.",
+        "description": (
+            "Create a new task in the attack graph. "
+            "Use information_score to prioritize high-value exploitation paths (CTF mode). "
+            "Set information_score=8-10 for tasks based on source code/credentials discovered by a parent task. "
+            "Set information_score=0-3 for pure reconnaissance tasks."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -286,6 +313,16 @@ CREATE_TASK_SCHEMA = {
                 "depend_on": {
                     "type": "array",
                     "description": "List of task IDs this task depends on. Use this to build causal prerequisite chains in the attack path graph.",
+                },
+                "information_score": {
+                    "type": "integer",
+                    "description": "Priority score 0-10. Higher = spawned from richer intelligence (source code, credentials, DB schema). Ready tasks are executed highest-score first.",
+                    "minimum": 0,
+                    "maximum": 10,
+                },
+                "intelligence_source": {
+                    "type": "string",
+                    "description": "Brief note on what parent finding triggered this task (e.g., 'source code of index.php revealed SQL query').",
                 },
             },
             "required": ["name", "description"],

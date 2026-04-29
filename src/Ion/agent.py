@@ -24,8 +24,8 @@ load_dotenv()
 
 # Fallback system prompt used when the user opts out of layered prompts.
 DEFAULT_SYSTEM_PROMPT = (
-    "You are Ion, a cybersecurity penetration testing agent. "
-    "You can plan attack paths using tasks, run pentest tools via skills, "
+    "You are Ion, an intelligent autonomous agent. "
+    "You can plan and execute tasks using a dynamic task graph, run specialized tools via skills, "
     "execute shell commands, write Python scripts, make HTTP requests, and search the web. "
     "Always think step by step and use tools when needed."
 )
@@ -39,7 +39,7 @@ SKILL_INSTRUCTIONS = (
 )
 
 
-class PentestAgent:
+class IonAgent:
     def __init__(
         self,
         model_id: str = "",
@@ -51,8 +51,12 @@ class PentestAgent:
         agent_registry: Optional[AgentRegistry] = None,
         logger: Optional[ObservabilityLogger] = None,
         # ---- Layered prompt configuration ----
+        # Mode selection (unified domain + operational style):
+        #   "general"  — General-purpose task solving (default)
+        #   "security" — Security assessment / penetration testing
+        #   "ctf"      — CTF capture-the-flag mode (flag-driven, aggressive)
         use_layered_prompts: bool = True,
-        agent_mode: str = "default",
+        mode: str = "general",
         dynamic_config: Optional[dict[str, Any]] = None,
         # ---- Loop / context configuration ----
         max_turns: int = 0,
@@ -89,11 +93,14 @@ class PentestAgent:
 
         self.tools = registry.get_tools_schema()
         self.use_layered_prompts = use_layered_prompts
-        self.agent_mode = agent_mode
+        self.mode = mode
 
         # ---- Build prompt builder (Layer 1 + Layer 2) ----
         if self.use_layered_prompts:
-            dyn_cfg = {"agent_mode": self.agent_mode, **(dynamic_config or {})}
+            dyn_cfg = {
+                "mode": self.mode,
+                **(dynamic_config or {}),
+            }
             self._prompt_builder = PromptBuilder(dynamic_config=dyn_cfg)
             self._fallback_prompt = None
         else:
@@ -201,3 +208,13 @@ class PentestAgent:
 
     def load_tasks(self, path: str):
         self.task_manager.load_from_file(path)
+
+
+# Backward compatibility alias
+class PentestAgent(IonAgent):
+    """Backward-compatible alias. Equivalent to IonAgent(mode='security')."""
+
+    def __init__(self, *args, **kwargs):
+        if "mode" not in kwargs:
+            kwargs["mode"] = "security"
+        super().__init__(*args, **kwargs)
