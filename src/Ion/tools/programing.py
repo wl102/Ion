@@ -4,8 +4,8 @@ import json
 import asyncio
 import traceback
 import requests
-import httpx
 from contextlib import redirect_stdout, redirect_stderr
+from .http_client import _httpx_client
 from .registry import registry, tool_error, tool_result
 
 logger = logging.getLogger(__name__)
@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 # 依然需要 Lock，因为 sys.stdout 是全局的
 _python_exec_lock = asyncio.Lock()
-_httpx_client = httpx.AsyncClient(verify=False)  # 忽略SSL证书验证
 
 
 async def _python_exec(code: str) -> str:
