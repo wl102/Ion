@@ -21,7 +21,7 @@ def list_tasks(sid: str, db: Session = Depends(get_db_session)):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     records = db.query(TaskRecord).filter_by(session_id=sid).order_by(TaskRecord.created_at).all()
-    return records
+    return [r.to_dict() for r in records]
 
 
 @router.get("/attack_graph", response_model=AttackGraphOut)
