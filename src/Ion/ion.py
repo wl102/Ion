@@ -37,6 +37,37 @@ class LoopState(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
+def _fallback_parse_xml_tool_calls(content: str) -> list[dict]:
+    """Parse XML-style tool calls embedded in content (minimax fallback)."""
+    if not content or "<invoke" not in content:
+        return []
+
+    tool_calls = []
+    # Match <invoke name="..."> ... </invoke> (with optional namespace prefix)
+    invoke_pattern = r'<(\w+:)?invoke\s+name=["\']([^"\']+)["\']\s*>(.*?)</(\w+:)?invoke>'
+    for match in re.finditer(invoke_pattern, content, re.DOTALL):
+        name = match.group(2)
+        inner = match.group(3)
+        args = {}
+        # Match <parameter name="...">value</parameter>
+        param_pattern = r'<(\w+:)?parameter\s+name=["\']([^"\']+)["\']\s*>(.*?)</(\w+:)?parameter>'
+        for pmatch in re.finditer(param_pattern, inner, re.DOTALL):
+            param_name = pmatch.group(2)
+            param_value = pmatch.group(3).strip()
+            args[param_name] = param_value
+
+        if args:
+            tool_calls.append(
+                {
+                    "id": f"xml_fallback_{len(tool_calls):02d}",
+                    "type": "function",
+                    "function": {"name": name, "arguments": json.dumps(args)},
+                }
+            )
+
+    return tool_calls
+
+
 def _char_based_estimate(messages: list[dict]) -> int:
     """Fallback rough token estimator: ~4 chars per token."""
     total_chars = 0
@@ -254,7 +285,7 @@ def run_one_turn(
                 reasoning = False
                 print("\n</think>\n")
             print(text, end="", flush=True)
-        elif delta and delta.tool_calls:
+        if delta and delta.tool_calls:
             for tc_delta in delta.tool_calls:
                 idx = tc_delta.index
                 if idx not in tool_calls_map:
@@ -273,7 +304,7 @@ def run_one_turn(
                         tc["function"]["name"] = tc_delta.function.name
                     if tc_delta.function.arguments:
                         tc["function"]["arguments"] += tc_delta.function.arguments
-        elif delta and delta.reasoning_content:
+        if delta and hasattr(delta, "reasoning_content") and delta.reasoning_content:
             if prefix and not prefix_printed:
                 print(prefix, end="", flush=True)
                 prefix_printed = True
@@ -296,11 +327,24 @@ def run_one_turn(
     content = "".join(content_parts)
     tool_calls_data = list(tool_calls_map.values())
 
-    assistant_message = {
-        "role": "assistant",
-        "content": content or None,
-        "reasoning_content": reasoning_content or None,
-    }
+    # Fallback: minimax sometimes embeds tool calls as XML in content
+    if not tool_calls_data and content:
+        fallback_calls = _fallback_parse_xml_tool_calls(content)
+        if fallback_calls:
+            tool_calls_data = fallback_calls
+            finish_reason = "tool_calls"
+
+    if reasoning_content:
+        assistant_message = {
+            "role": "assistant",
+            "content": content or None,
+            "reasoning_content": reasoning_content or None,
+        }
+    else:
+        assistant_message = {
+            "role": "assistant",
+            "content": content or None,
+        }
     if tool_calls_data:
         assistant_message["tool_calls"] = tool_calls_data
     state.messages.append(assistant_message)
@@ -312,8 +356,15 @@ def run_one_turn(
 
         for tool in tool_calls_data:
             name = tool["function"]["name"]
-            args = json.loads(tool["function"]["arguments"])
-
+            try:
+                args = json.loads(tool["function"]["arguments"])
+            except json.JSONDecodeError as e:
+                # retry 3
+                print(f"[ERROR]:{e}")
+                continue
+            except Exception as e:
+                print(f"[ERROR]:{e}")
+                continue
             start = time.time()
 
             output = dispatch(name, **args)
@@ -452,9 +503,20 @@ def _has_progress(state: LoopState, tracker: SubagentLoopTracker) -> bool:
             '"status": 200' in content or '"status": 500' in content,
             '"status": 403' in content or '"status": 401' in content,
             # IDOR / enumeration: content-length differences signal unauthorized data access
-            "content-length" in content_lower and ("different" in content_lower or "anomal" in content_lower or "outlier" in content_lower),
-            "length=" in content_lower and ("diff" in content_lower or "vary" in content_lower or "cluster" in content_lower),
-            "status: 200" in content_lower and "len=" in content_lower,  # enumeration output listing HTTP responses
+            "content-length" in content_lower
+            and (
+                "different" in content_lower
+                or "anomal" in content_lower
+                or "outlier" in content_lower
+            ),
+            "length=" in content_lower
+            and (
+                "diff" in content_lower
+                or "vary" in content_lower
+                or "cluster" in content_lower
+            ),
+            "status: 200" in content_lower
+            and "len=" in content_lower,  # enumeration output listing HTTP responses
             # File content / source code
             "<?php" in content_lower,
             "import " in content_lower,
@@ -495,7 +557,19 @@ def _has_progress(state: LoopState, tracker: SubagentLoopTracker) -> bool:
         if len(content) < 30:
             return False
         # Check if assistant is reporting findings or just planning
-        finding_keywords = ["found", "discovered", "confirmed", "identified", "extracted", "successful", "different length", "content-length", "anomaly", "outlier", "unauthorized"]
+        finding_keywords = [
+            "found",
+            "discovered",
+            "confirmed",
+            "identified",
+            "extracted",
+            "successful",
+            "different length",
+            "content-length",
+            "anomaly",
+            "outlier",
+            "unauthorized",
+        ]
         if any(kw in content.lower() for kw in finding_keywords):
             return True
         return True
