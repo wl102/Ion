@@ -6,15 +6,15 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from Ion.db import get_default_db
+from Ion.db import Database, get_default_db
 from Ion.db.models import SessionRecord
 from Ion.web.schemas import LogsOut
 
 router = APIRouter()
 
 
-def get_db_session(db=Depends(get_default_db)):
-    return next(db.get_session())
+def get_db_session(db: Database = Depends(get_default_db)):
+    yield from db.get_session()
 
 
 @router.get("", response_model=LogsOut)

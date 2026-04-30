@@ -14,7 +14,7 @@ router = APIRouter()
 
 
 def get_db_session(db: Database = Depends(get_default_db)) -> Session:
-    return next(db.get_session())
+    yield from db.get_session()
 
 
 @router.post("", response_model=SessionOut)

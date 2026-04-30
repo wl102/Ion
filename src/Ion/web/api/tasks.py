@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from Ion.db import get_default_db
+from Ion.db import Database, get_default_db
 from Ion.db.models import SessionRecord, TaskRecord
 from Ion.web.schemas import TaskOut, AttackGraphOut
 from Ion.web.agent_runner import WebAgentRunner
@@ -11,8 +11,8 @@ from Ion.web.agent_runner import WebAgentRunner
 router = APIRouter()
 
 
-def get_db_session(db=Depends(get_default_db)):
-    return next(db.get_session())
+def get_db_session(db: Database = Depends(get_default_db)):
+    yield from db.get_session()
 
 
 @router.get("", response_model=list[TaskOut])
