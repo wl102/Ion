@@ -383,3 +383,109 @@ ATTACK_GRAPH_VIEW_SCHEMA = {
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Persistent TaskManager backed by SQLAlchemy
+# ---------------------------------------------------------------------------
+
+class PersistentTaskManager(TaskManager):
+    """TaskManager that syncs every mutation to a database."""
+
+    def __init__(self, session_id: str, db=None):
+        super().__init__()
+        self.session_id = session_id
+        self._db = db
+        self._loaded = False
+
+    def _get_db(self):
+        if self._db is None:
+            from Ion.db import get_default_db
+            self._db = get_default_db()
+        return self._db
+
+    def _sync_task(self, task: Task):
+        from Ion.db.models import TaskRecord
+        db = self._get_db()
+        with next(db.get_session()) as sess:
+            existing = sess.query(TaskRecord).filter_by(id=task.id).first()
+            if existing is None:
+                record = TaskRecord(
+                    id=task.id,
+                    session_id=self.session_id,
+                    name=task.name,
+                    description=task.description,
+                    status=task.status.value,
+                    depend_on=json.dumps(task.depend_on),
+                    result=task.result,
+                    on_failure=task.on_failure,
+                    attempt_count=task.attempt_count,
+                    max_attempts=task.max_attempts,
+                    information_score=task.information_score,
+                    intelligence_source=task.intelligence_source,
+                )
+                sess.add(record)
+            else:
+                existing.name = task.name
+                existing.description = task.description
+                existing.status = task.status.value
+                existing.depend_on = json.dumps(task.depend_on)
+                existing.result = task.result
+                existing.on_failure = task.on_failure
+                existing.attempt_count = task.attempt_count
+                existing.max_attempts = task.max_attempts
+                existing.information_score = task.information_score
+                existing.intelligence_source = task.intelligence_source
+            sess.commit()
+
+    def _delete_from_db(self, task_id: str):
+        from Ion.db.models import TaskRecord
+        db = self._get_db()
+        with next(db.get_session()) as sess:
+            record = sess.query(TaskRecord).filter_by(id=task_id).first()
+            if record:
+                sess.delete(record)
+                sess.commit()
+
+    def add_task(self, task: Task) -> Task:
+        result = super().add_task(task)
+        self._sync_task(result)
+        return result
+
+    def update_status(
+        self, task_id: str, status: TaskStatus, result: Optional[str] = None
+    ) -> Optional[Task]:
+        updated = super().update_status(task_id, status, result)
+        if updated is not None:
+            self._sync_task(updated)
+        return updated
+
+    def delete_task(self, task_id: str) -> bool:
+        ok = super().delete_task(task_id)
+        if ok:
+            self._delete_from_db(task_id)
+        return ok
+
+    def load_from_db(self):
+        """Load tasks from database into memory."""
+        from Ion.db.models import TaskRecord
+        db = self._get_db()
+        with next(db.get_session()) as sess:
+            records = sess.query(TaskRecord).filter_by(session_id=self.session_id).all()
+            self._tasks = {}
+            for r in records:
+                task = Task(
+                    id=r.id,
+                    name=r.name,
+                    description=r.description,
+                    status=TaskStatus(r.status),
+                    depend_on=json.loads(r.depend_on) if r.depend_on else [],
+                    result=r.result,
+                    on_failure=r.on_failure,
+                    attempt_count=r.attempt_count,
+                    max_attempts=r.max_attempts,
+                    information_score=r.information_score,
+                    intelligence_source=r.intelligence_source,
+                )
+                self._tasks[task.id] = task
+        self._loaded = True

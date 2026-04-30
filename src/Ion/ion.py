@@ -1,4 +1,5 @@
 import json
+import queue
 import re
 import time
 from typing import Any, Optional, Literal
@@ -30,6 +31,7 @@ class LoopState(BaseModel):
     compression_count: int = 0
     last_prompt_tokens: int = 0
     last_message_count: int = 0
+    hook_queue: Optional[Any] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -235,9 +237,11 @@ def run_one_turn(
     tools: list[dict],
     logger=None,
     agent_name: str = "root",
+    callbacks: Optional[dict[str, Any]] = None,
 ):
     prefix = f"[SubAgent: {agent_name}] " if agent_name != "root" else ""
     prefix_printed = False
+    message_id: str | None = None
 
     # Try streaming with usage; fall back if provider doesn't support stream_options.
     try:
@@ -266,6 +270,13 @@ def run_one_turn(
     reasoning = False
 
     for chunk in response:
+        if message_id is None and hasattr(chunk, "id") and chunk.id:
+            message_id = chunk.id
+            if callbacks:
+                cb = callbacks.get("on_assistant_start")
+                if cb:
+                    cb(message_id)
+
         choice = chunk.choices[0] if chunk.choices else None
         if choice is None:
             # usage-only chunk when stream_options is supported
@@ -285,6 +296,10 @@ def run_one_turn(
                 reasoning = False
                 print("\n</think>\n")
             print(text, end="", flush=True)
+            if callbacks:
+                cb = callbacks.get("on_assistant_chunk")
+                if cb:
+                    cb(text, reasoning=False, message_id=message_id)
         if delta and delta.tool_calls:
             for tc_delta in delta.tool_calls:
                 idx = tc_delta.index
@@ -314,6 +329,10 @@ def run_one_turn(
                 reasoning = True
                 print("<think>\n")
             print(text, end="", flush=True)
+            if callbacks:
+                cb = callbacks.get("on_assistant_chunk")
+                if cb:
+                    cb(text, reasoning=True, message_id=message_id)
 
         if choice.finish_reason is not None:
             finish_reason = choice.finish_reason
@@ -349,10 +368,19 @@ def run_one_turn(
         assistant_message["tool_calls"] = tool_calls_data
     state.messages.append(assistant_message)
 
+    if callbacks:
+        cb = callbacks.get("on_assistant_end")
+        if cb:
+            cb(message_id)
+
     if finish_reason == "tool_calls":
         tool_names = [t["function"]["name"] for t in tool_calls_data]
         exec_prefix = f"[{agent_name}] " if agent_name != "root" else ""
         print(f"{exec_prefix}🔧 Executing: {', '.join(tool_names)}")
+        if callbacks:
+            cb = callbacks.get("on_tool_start")
+            if cb:
+                cb(tool_names)
 
         for tool in tool_calls_data:
             name = tool["function"]["name"]
@@ -372,6 +400,10 @@ def run_one_turn(
 
             if logger:
                 logger.log_tool_call(name, args, output, duration)
+            if callbacks:
+                cb = callbacks.get("on_tool_result")
+                if cb:
+                    cb(name, output, duration)
 
             state.messages.append(
                 {
@@ -395,6 +427,20 @@ def run_one_turn(
         state.last_message_count = len(state.messages)
 
 
+def _check_and_inject_hooks(state: LoopState):
+    """Drain any pending user hook messages into the conversation."""
+    if state.hook_queue is None:
+        return
+    hooks = []
+    while True:
+        try:
+            hooks.append(state.hook_queue.get_nowait())
+        except queue.Empty:
+            break
+    for hook_content in hooks:
+        state.messages.append({"role": "user", "content": hook_content})
+
+
 def run_agent_loop(
     client,
     model_id: str,
@@ -403,6 +449,7 @@ def run_agent_loop(
     logger=None,
     on_before_turn=None,
     agent_name: str = "root",
+    callbacks: Optional[dict[str, Any]] = None,
 ):
     """
     Run the agent loop until a non-tool-calls finish reason is reached.
@@ -412,6 +459,9 @@ def run_agent_loop(
                         Can be used to refresh the system prompt with
                         updated runtime context (e.g., task graph state).
         agent_name: Identifier used for stdout prefixing (sub-agents).
+        callbacks: Optional dict of callbacks for streaming events.
+                   Supported keys: on_assistant_chunk, on_tool_start,
+                   on_tool_result, on_turn_complete.
     """
     from Ion.observability import _observability_logger_ctx
 
@@ -434,7 +484,14 @@ def run_agent_loop(
             if on_before_turn is not None:
                 on_before_turn(state)
 
-            run_one_turn(client, model_id, state, tools, logger, agent_name=agent_name)
+            _check_and_inject_hooks(state)
+
+            run_one_turn(client, model_id, state, tools, logger, agent_name=agent_name, callbacks=callbacks)
+
+            if callbacks:
+                cb = callbacks.get("on_turn_complete")
+                if cb:
+                    cb(state.turn_count, state.finish_reason)
 
             # --- post-turn length handling ---
             if state.finish_reason == "length":

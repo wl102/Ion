@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ion Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar: Sessions -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+          <div>
+            <h1 class="logo-title">ION</h1>
+            <span class="logo-sub">Agent Console</span>
+          </div>
+        </div>
+        <button class="btn-icon" id="btn-new-session" title="New Session">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+      </div>
+      <div class="session-list" id="session-list">
+        <div class="session-empty">No sessions yet</div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- No Session Selected -->
+      <div class="welcome" id="welcome">
+        <div class="welcome-inner">
+          <svg class="welcome-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+          <h2>Ion Security Agent</h2>
+          <p>Create a new session or select an existing one to start.</p>
+          <button class="btn-primary" id="btn-welcome-new">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            New Session
+          </button>
+        </div>
+      </div>
+
+      <!-- Session View -->
+      <div class="session-view hidden" id="session-view">
+        <!-- Top Bar -->
+        <div class="topbar">
+          <div class="topbar-left">
+            <button class="btn-icon mobile-only" id="btn-toggle-sidebar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            </button>
+            <div class="topbar-info">
+              <h2 class="topbar-title" id="topbar-title">Session</h2>
+              <span class="topbar-status" id="topbar-status">idle</span>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <button class="btn-ghost" id="btn-tasks-panel" title="Tasks">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+              <span>Tasks</span>
+            </button>
+            <button class="btn-ghost btn-danger" id="btn-delete-session" title="Delete">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Content Area -->
+        <div class="content-area">
+          <!-- Chat Panel -->
+          <div class="chat-panel">
+            <div class="messages" id="messages">
+              <div class="messages-empty" id="messages-empty">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                <p>Send a query to start the agent</p>
+              </div>
+            </div>
+
+            <!-- Hook Input (shown when agent is running) -->
+            <div class="hook-bar hidden" id="hook-bar">
+              <div class="hook-label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-pulse"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <span>Agent running — send hook input</span>
+              </div>
+              <div class="hook-input-row">
+                <input type="text" id="hook-input" placeholder="Interrupt instruction..." autocomplete="off">
+                <button class="btn-accent" id="btn-hook">Hook</button>
+              </div>
+            </div>
+
+            <!-- Query Input -->
+            <div class="input-bar" id="input-bar">
+              <div class="input-row">
+                <textarea id="query-input" placeholder="Enter your security task..." rows="1" autocomplete="off"></textarea>
+                <button class="btn-primary btn-send" id="btn-run" title="Run">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </button>
+              </div>
+              <div class="input-meta">
+                <select id="mode-select" class="mode-select">
+                  <option value="security">Security</option>
+                  <option value="general">General</option>
+                </select>
+                <span class="input-hint">Shift+Enter for newline</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tasks Side Panel -->
+          <div class="tasks-panel hidden" id="tasks-panel">
+            <div class="tasks-header">
+              <h3>Attack Plan</h3>
+              <button class="btn-icon" id="btn-close-tasks">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            <div class="tasks-body" id="tasks-body">
+              <div class="tasks-empty">No tasks yet</div>
+            </div>
+            <div class="tasks-footer">
+              <button class="btn-ghost btn-sm" id="btn-graph">View Attack Graph</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- New Session Modal -->
+  <div class="modal-overlay hidden" id="modal-new">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>New Session</h3>
+        <button class="btn-icon" id="btn-modal-close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label">Title</label>
+        <input type="text" id="new-title" class="form-input" placeholder="Redis scan, Web pentest...">
+        <label class="form-label">Mode</label>
+        <select id="new-mode" class="form-input">
+          <option value="security">Security</option>
+          <option value="general">General</option>
+        </select>
+        <label class="form-label">Query</label>
+        <textarea id="new-query" class="form-input" rows="3" placeholder="Scan 192.168.1.1:6379 for vulnerabilities..."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" id="btn-modal-cancel">Cancel</button>
+        <button class="btn-primary" id="btn-modal-create">Create Session</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Attack Graph Modal -->
+  <div class="modal-overlay hidden" id="modal-graph">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h3>Attack Graph</h3>
+        <button class="btn-icon" id="btn-graph-close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <pre class="graph-content" id="graph-content">Loading...</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

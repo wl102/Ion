@@ -1,4 +1,5 @@
 import os
+import queue
 from typing import Any, Optional
 
 from dotenv import load_dotenv
@@ -86,6 +87,7 @@ class IonAgent:
         self.skill_registry = skill_registry or SkillRegistry()
         self.agent_registry = agent_registry or AgentRegistry()
         self.logger = logger or ObservabilityLogger()
+        self.hook_queue: queue.Queue = queue.Queue()
 
         # 注册依赖上下文的工具（task / skill）
         register_task_tools(self.task_manager)
@@ -159,7 +161,11 @@ class IonAgent:
     #  Main execution                                                    #
     # ------------------------------------------------------------------ #
 
-    def run(self, query: str) -> str:
+    def submit_hook(self, content: str):
+        """Inject a user message into the running agent loop."""
+        self.hook_queue.put(content)
+
+    def run(self, query: str, callbacks: Optional[dict[str, Any]] = None) -> str:
         # Initial system prompt with runtime context (Layer 3 injected at start)
         system_prompt = self._build_system_prompt(user_goal=query)
 
@@ -171,6 +177,7 @@ class IonAgent:
             messages=messages,
             max_turns=self.max_turns,
             context_max_tokens=self.context_max_tokens,
+            hook_queue=self.hook_queue,
         )
 
         # Callback to refresh the system prompt before each turn.
@@ -192,6 +199,7 @@ class IonAgent:
             self.tools,
             self.logger,
             on_before_turn=_on_before_turn,
+            callbacks=callbacks,
         )
 
         if self.logger:
