@@ -84,18 +84,6 @@
               </div>
             </div>
 
-            <!-- Hook Input (shown when agent is running) -->
-            <div class="hook-bar hidden" id="hook-bar">
-              <div class="hook-label">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-pulse"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                <span>Agent running — send hook input</span>
-              </div>
-              <div class="hook-input-row">
-                <input type="text" id="hook-input" placeholder="Interrupt instruction..." autocomplete="off">
-                <button class="btn-accent" id="btn-hook">Hook</button>
-              </div>
-            </div>
-
             <!-- Query Input -->
             <div class="input-bar" id="input-bar">
               <div class="input-row">
@@ -103,13 +91,12 @@
                 <button class="btn-primary btn-send" id="btn-run" title="Run">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                 </button>
+                <button class="btn-danger btn-send hidden" id="btn-interrupt" title="Interrupt">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                </button>
               </div>
               <div class="input-meta">
-                <select id="mode-select" class="mode-select">
-                  <option value="security">Security</option>
-                  <option value="general">General</option>
-                </select>
-                <span class="input-hint">Shift+Enter for newline</span>
+                <span class="input-hint" id="input-hint">Shift+Enter for newline</span>
               </div>
             </div>
           </div>
@@ -148,8 +135,9 @@
         <input type="text" id="new-title" class="form-input" placeholder="Redis scan, Web pentest...">
         <label class="form-label">Mode</label>
         <select id="new-mode" class="form-input">
-          <option value="security">Security</option>
           <option value="general">General</option>
+          <option value="security">Security</option>
+          <option value="ctf">CTF</option>
         </select>
         <label class="form-label">Query</label>
         <textarea id="new-query" class="form-input" rows="3" placeholder="Scan 192.168.1.1:6379 for vulnerabilities..."></textarea>

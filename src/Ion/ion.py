@@ -450,6 +450,7 @@ def run_agent_loop(
     on_before_turn=None,
     agent_name: str = "root",
     callbacks: Optional[dict[str, Any]] = None,
+    pause_check: Optional[callable] = None,
 ):
     """
     Run the agent loop until a non-tool-calls finish reason is reached.
@@ -492,6 +493,10 @@ def run_agent_loop(
                 cb = callbacks.get("on_turn_complete")
                 if cb:
                     cb(state.turn_count, state.finish_reason)
+
+            # --- pause check ---
+            if pause_check is not None:
+                pause_check()
 
             # --- post-turn length handling ---
             if state.finish_reason == "length":

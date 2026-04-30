@@ -8,6 +8,7 @@
   let currentSid = null;
   let eventSource = null;
   let isRunning = false;
+  let isPaused = false;
   let tasks = [];
   let tasksPanelOpen = false;
 
@@ -21,12 +22,12 @@
   const messages = $('#messages');
   const messagesEmpty = $('#messages-empty');
   const queryInput = $('#query-input');
-  const hookBar = $('#hook-bar');
-  const hookInput = $('#hook-input');
   const inputBar = $('#input-bar');
+  const btnRun = $('#btn-run');
+  const btnInterrupt = $('#btn-interrupt');
+  const inputHint = $('#input-hint');
   const tasksPanel = $('#tasks-panel');
   const tasksBody = $('#tasks-body');
-  const modeSelect = $('#mode-select');
 
   // ---- API Client ----
   async function api(path, opts = {}) {
@@ -123,6 +124,10 @@
     if (session.status === 'running') {
       connectSSE(sid);
       showRunningUI();
+    } else if (session.status === 'paused') {
+      isRunning = true;
+      isPaused = true;
+      showPausedUI();
     } else {
       showIdleUI();
     }
@@ -132,6 +137,7 @@
     topbarStatus.textContent = status;
     topbarStatus.dataset.status = status;
     isRunning = status === 'running';
+    isPaused = status === 'paused';
   }
 
   function showWelcome() {
@@ -141,17 +147,30 @@
 
   function showRunningUI() {
     isRunning = true;
+    isPaused = false;
     queryInput.disabled = true;
-    $('#btn-run').disabled = true;
-    hookBar.classList.remove('hidden');
-    hookInput.focus();
+    btnRun.classList.add('hidden');
+    btnInterrupt.classList.remove('hidden');
+    inputHint.textContent = 'Agent is running — click interrupt to pause';
   }
 
   function showIdleUI() {
     isRunning = false;
+    isPaused = false;
     queryInput.disabled = false;
-    $('#btn-run').disabled = false;
-    hookBar.classList.add('hidden');
+    btnRun.classList.remove('hidden');
+    btnInterrupt.classList.add('hidden');
+    inputHint.textContent = 'Shift+Enter for newline';
+    queryInput.focus();
+  }
+
+  function showPausedUI() {
+    isRunning = true;
+    isPaused = true;
+    queryInput.disabled = false;
+    btnRun.classList.remove('hidden');
+    btnInterrupt.classList.add('hidden');
+    inputHint.textContent = 'Agent paused — send a message to continue';
     queryInput.focus();
   }
 
@@ -171,9 +190,11 @@
 
     eventSource.onerror = () => {
       disconnectSSE();
-      updateStatus('completed');
-      showIdleUI();
-      loadSessions();
+      if (!isPaused) {
+        updateStatus('completed');
+        showIdleUI();
+        loadSessions();
+      }
     };
   }
 
@@ -208,10 +229,6 @@
 
       case 'task_update':
         handleTaskUpdate(evt.payload);
-        break;
-
-      case 'hook_received':
-        appendMessage('system', `Hook: ${evt.payload}`);
         break;
 
       case 'done':
@@ -334,7 +351,7 @@
     });
   }
 
-  // ---- Run Agent ----
+  // ---- Run / Interrupt / Resume ----
   async function runAgent(query) {
     if (!currentSid || !query.trim()) return;
 
@@ -358,18 +375,39 @@
     }
   }
 
-  // ---- Hook ----
-  async function submitHook(content) {
-    if (!currentSid || !content.trim()) return;
+  async function interruptAgent() {
+    if (!currentSid || !isRunning) return;
     try {
-      await api(`/api/sessions/${currentSid}/hook`, {
-        method: 'POST',
-        body: JSON.stringify({ content }),
-      });
-      hookInput.value = '';
-      toast('Hook submitted', 'success');
+      disconnectSSE();
+      await api(`/api/sessions/${currentSid}/interrupt`, { method: 'POST' });
+      updateStatus('paused');
+      showPausedUI();
+      await loadSessions();
     } catch (err) {
       toast(err.message, 'error');
+    }
+  }
+
+  async function resumeAgent(query) {
+    if (!currentSid || !query.trim()) return;
+
+    appendMessage('user', query);
+    scrollToBottom();
+    queryInput.value = '';
+    autoResize(queryInput);
+
+    try {
+      await api(`/api/sessions/${currentSid}/resume`, {
+        method: 'POST',
+        body: JSON.stringify({ query }),
+      });
+      connectSSE(currentSid);
+      updateStatus('running');
+      showRunningUI();
+      await loadSessions();
+    } catch (err) {
+      appendMessage('error', err.message);
+      scrollToBottom();
     }
   }
 
@@ -494,26 +532,29 @@
       }
     });
 
-    // Run agent
-    $('#btn-run').addEventListener('click', () => runAgent(queryInput.value));
-
-    queryInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
+    // Run / Interrupt / Resume
+    btnRun.addEventListener('click', () => {
+      if (isPaused) {
+        resumeAgent(queryInput.value);
+      } else {
         runAgent(queryInput.value);
       }
     });
 
-    queryInput.addEventListener('input', () => autoResize(queryInput));
+    btnInterrupt.addEventListener('click', () => interruptAgent());
 
-    // Hook
-    $('#btn-hook').addEventListener('click', () => submitHook(hookInput.value));
-    hookInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
+    queryInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        submitHook(hookInput.value);
+        if (isPaused) {
+          resumeAgent(queryInput.value);
+        } else {
+          runAgent(queryInput.value);
+        }
       }
     });
+
+    queryInput.addEventListener('input', () => autoResize(queryInput));
 
     // Delete session
     $('#btn-delete-session').addEventListener('click', () => {

@@ -50,6 +50,37 @@ async def submit_hook(sid: str, req: HookRequest, db: Session = Depends(get_db_s
     return {"status": "hook_submitted", "session_id": sid}
 
 
+@router.post("/interrupt")
+async def interrupt_agent(sid: str, db: Session = Depends(get_db_session)):
+    session = db.query(SessionRecord).filter_by(id=sid).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    runner = WebAgentRunner.get(sid)
+    if not runner:
+        raise HTTPException(status_code=409, detail="Agent not running")
+    runner.interrupt()
+    session.status = "paused"
+    db.commit()
+    return {"status": "interrupted", "session_id": sid}
+
+
+@router.post("/resume")
+async def resume_agent(sid: str, req: RunRequest, db: Session = Depends(get_db_session)):
+    session = db.query(SessionRecord).filter_by(id=sid).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    runner = WebAgentRunner.get(sid)
+    if not runner:
+        raise HTTPException(status_code=409, detail="Agent not running")
+    await runner.submit_hook(req.query)
+    runner.resume()
+    session.status = "running"
+    db.commit()
+    return {"status": "resumed", "session_id": sid}
+
+
 @router.get("/stream")
 async def stream_events(sid: str, db: Session = Depends(get_db_session)):
     session = db.query(SessionRecord).filter_by(id=sid).first()

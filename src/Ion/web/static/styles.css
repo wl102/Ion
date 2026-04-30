@@ -152,6 +152,7 @@ html, body {
 
 .session-item.active .session-icon { background: var(--accent); }
 .session-item[data-status="running"] .session-icon { background: var(--accent); animation: pulse 1.5s infinite; }
+.session-item[data-status="paused"] .session-icon { background: #fbbf24; animation: pulse 1.5s infinite; }
 .session-item[data-status="completed"] .session-icon { background: #3b82f6; }
 
 .session-item .session-info {
@@ -281,6 +282,7 @@ html, body {
 }
 
 .topbar-status[data-status="running"] { background: var(--accent-dim); color: var(--accent); animation: pulse 1.5s infinite; }
+.topbar-status[data-status="paused"] { background: rgba(234,179,8,0.15); color: #fbbf24; animation: pulse 1.5s infinite; }
 .topbar-status[data-status="completed"] { background: rgba(59,130,246,0.15); color: #3b82f6; }
 .topbar-status[data-status="error"] { background: var(--danger-dim); color: var(--danger); }
 
@@ -454,10 +456,10 @@ html, body {
 }
 
 .msg-reasoning .msg-body {
-  background: rgba(139,92,246,0.08);
-  border: 1px solid rgba(139,92,246,0.15);
+  background: rgba(59,130,246,0.06);
+  border: 1px solid rgba(59,130,246,0.12);
   border-radius: var(--radius-sm);
-  color: #a78bfa;
+  color: #93c5fd;
   font-size: 12px;
   font-style: italic;
 }
@@ -720,6 +722,25 @@ html, body {
 .btn-ghost:hover { border-color: var(--border-hover); color: var(--text); background: rgba(255,255,255,0.03); }
 .btn-ghost svg { width: 14px; height: 14px; }
 .btn-ghost.btn-danger:hover { border-color: rgba(239,68,68,0.3); color: #f87171; background: var(--danger-dim); }
+
+.btn-danger {
+  background: var(--danger);
+  color: white;
+  border: none;
+  padding: 8px 18px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-danger:hover { background: #f87171; transform: translateY(-1px); }
+.btn-danger:active { transform: translateY(0); }
+.btn-danger:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
 .btn-accent {
   background: rgba(234,179,8,0.15);

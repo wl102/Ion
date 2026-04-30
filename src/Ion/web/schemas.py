@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -10,17 +10,19 @@ from pydantic import BaseModel, Field
 # Session schemas
 # ---------------------------------------------------------------------------
 
+SessionMode = Literal["general", "security", "ctf"]
+
 
 class SessionCreate(BaseModel):
     title: str = ""
-    mode: str = "general"
+    mode: SessionMode = "general"
     query: str = ""
 
 
 class SessionOut(BaseModel):
     id: str
     title: str
-    mode: str
+    mode: SessionMode
     status: str
     log_dir: str
     created_at: Optional[datetime] = None

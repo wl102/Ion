@@ -38,6 +38,8 @@ class WebAgentRunner:
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"agent-{session_id}")
         self._run_future: Any = None
         self._done = False
+        self._pause_event = threading.Event()
+        self._pause_event.set()  # default: not paused
 
         _model_id = model_id or os.getenv("MODEL_ID", "")
         _base_url = base_url or os.getenv("OPENAI_BASE_URL")
@@ -162,6 +164,14 @@ class WebAgentRunner:
         except Exception:
             return []
 
+    def interrupt(self):
+        """Pause the agent loop after the current turn completes."""
+        self._pause_event.clear()
+
+    def resume(self):
+        """Resume a paused agent loop."""
+        self._pause_event.set()
+
     def _agent_run_wrapper(self, query: str):
         """Runs in a background thread."""
         try:
@@ -171,7 +181,11 @@ class WebAgentRunner:
                     self._main_loop,
                 )
             callbacks = self._make_callbacks()
-            result = self.agent.run(query, callbacks=callbacks)
+
+            def pause_check():
+                self._pause_event.wait()
+
+            result = self.agent.run(query, callbacks=callbacks, pause_check=pause_check)
             if self.sse_queue is not None and self._main_loop is not None:
                 asyncio.run_coroutine_threadsafe(
                     self.sse_queue.put({"type": "done", "payload": result}),

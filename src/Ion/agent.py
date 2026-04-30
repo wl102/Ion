@@ -165,7 +165,7 @@ class IonAgent:
         """Inject a user message into the running agent loop."""
         self.hook_queue.put(content)
 
-    def run(self, query: str, callbacks: Optional[dict[str, Any]] = None) -> str:
+    def run(self, query: str, callbacks: Optional[dict[str, Any]] = None, pause_check: Optional[callable] = None) -> str:
         # Initial system prompt with runtime context (Layer 3 injected at start)
         system_prompt = self._build_system_prompt(user_goal=query)
 
@@ -200,6 +200,7 @@ class IonAgent:
             self.logger,
             on_before_turn=_on_before_turn,
             callbacks=callbacks,
+            pause_check=pause_check,
         )
 
         if self.logger:
