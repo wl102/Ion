@@ -10,8 +10,19 @@ from typing import Any
 
 from Ion.agent import IonAgent
 from Ion.db import Database
+from Ion.db.models import MessageRecord
 from Ion.observability import ObservabilityLogger
 from Ion.tools.task_tool import PersistentTaskManager
+
+
+class _AssistantBuffer:
+    """Accumulates streamed chunks for one assistant message."""
+
+    __slots__ = ("content", "reasoning")
+
+    def __init__(self) -> None:
+        self.content: list[str] = []
+        self.reasoning: list[str] = []
 
 
 class WebAgentRunner:
@@ -40,6 +51,13 @@ class WebAgentRunner:
         self._done = False
         self._pause_event = threading.Event()
         self._pause_event.set()  # default: not paused
+
+        # Per-message_id assistant streaming buffers (held only during a turn)
+        self._assistant_buffers: dict[str, _AssistantBuffer] = {}
+        # Persistence is serialized to a single thread to avoid SQLite contention
+        self._persist_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix=f"persist-{session_id}"
+        )
 
         _model_id = model_id or os.getenv("MODEL_ID", "")
         _base_url = base_url or os.getenv("OPENAI_BASE_URL")
@@ -83,6 +101,45 @@ class WebAgentRunner:
             runner = cls._runners.pop(session_id, None)
             if runner:
                 runner._executor.shutdown(wait=False)
+                runner._persist_executor.shutdown(wait=False)
+
+    # ------------------------------------------------------------------ #
+    #  Persistence helpers                                               #
+    # ------------------------------------------------------------------ #
+
+    def _persist_message(
+        self,
+        role: str,
+        content: str | None = None,
+        reasoning_content: str | None = None,
+        tool_calls: list[dict] | None = None,
+        tool_call_id: str = "",
+        tool_name: str = "",
+        duration_ms: float = 0.0,
+        message_id: str = "",
+    ) -> None:
+        """Schedule an INSERT into messages table on the persistence thread."""
+
+        def _do_insert() -> None:
+            try:
+                with next(self.db.get_session()) as sess:
+                    record = MessageRecord(
+                        session_id=self.session_id,
+                        message_id=message_id,
+                        role=role,
+                        content=content,
+                        reasoning_content=reasoning_content,
+                        tool_calls=json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None,
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_name,
+                        duration_ms=duration_ms,
+                    )
+                    sess.add(record)
+                    sess.commit()
+            except Exception as exc:  # pragma: no cover — keep agent running
+                print(f"[message-persist] failed to insert {role!r}: {exc}")
+
+        self._persist_executor.submit(_do_insert)
 
     def _make_callbacks(self) -> dict[str, Any]:
         """Build callback dict for IonAgent.run() to capture streaming events.
@@ -98,18 +155,42 @@ class WebAgentRunner:
                 asyncio.run_coroutine_threadsafe(self.sse_queue.put(event), loop)
 
         def on_assistant_start(message_id: str):
+            self._assistant_buffers[message_id or ""] = _AssistantBuffer()
             put_event({"type": "assistant_start", "message_id": message_id})
 
         def on_assistant_chunk(text: str, reasoning: bool = False, message_id: str = ""):
+            buf = self._assistant_buffers.get(message_id or "")
+            if buf is None:
+                buf = _AssistantBuffer()
+                self._assistant_buffers[message_id or ""] = buf
+            (buf.reasoning if reasoning else buf.content).append(text)
             put_event({"type": "assistant", "payload": text, "reasoning": reasoning, "message_id": message_id})
 
         def on_assistant_end(message_id: str):
+            buf = self._assistant_buffers.pop(message_id or "", None)
+            if buf is not None:
+                content = "".join(buf.content) or None
+                reasoning = "".join(buf.reasoning) or None
+                if content or reasoning:
+                    self._persist_message(
+                        role="assistant",
+                        content=content,
+                        reasoning_content=reasoning,
+                        message_id=message_id or "",
+                    )
             put_event({"type": "assistant_end", "message_id": message_id})
 
         def on_tool_start(names: list[str]):
             put_event({"type": "tool_start", "payload": names})
 
         def on_tool_result(name: str, output: str, duration_ms: float):
+            # Persist full tool output (no truncation in DB).
+            self._persist_message(
+                role="tool",
+                content=output,
+                tool_name=name,
+                duration_ms=round(duration_ms, 2),
+            )
             # Truncate large outputs for SSE
             payload = output if len(output) < 5000 else output[:5000] + "\n...[truncated]"
             put_event(
@@ -208,11 +289,15 @@ class WebAgentRunner:
         self._main_loop = asyncio.get_running_loop()
         self.sse_queue = asyncio.Queue()
         self._queue_ready.set()
+        # Persist the user's query as a user message before the agent starts.
+        self._persist_message(role="user", content=query)
         loop = self._main_loop
         self._run_future = loop.run_in_executor(self._executor, self._agent_run_wrapper, query)
 
     async def submit_hook(self, content: str):
         self.agent.submit_hook(content)
+        # Hooks become user messages in the agent loop — persist them too.
+        self._persist_message(role="user", content=content)
         if self.sse_queue is not None:
             await self.sse_queue.put({"type": "hook_received", "payload": content})
 

@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from Ion.web.api import sessions, tasks, agent, logs
+from Ion.web.api import sessions, tasks, agent, logs, messages
 
 app = FastAPI(title="Ion Agent Web API", version="0.1.0")
 
@@ -24,6 +24,7 @@ app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(tasks.router, prefix="/api/sessions/{sid}/tasks", tags=["tasks"])
 app.include_router(agent.router, prefix="/api/sessions/{sid}", tags=["agent"])
 app.include_router(logs.router, prefix="/api/sessions/{sid}/logs", tags=["logs"])
+app.include_router(messages.router, prefix="/api/sessions/{sid}/messages", tags=["messages"])
 
 @app.get("/health")
 def health():

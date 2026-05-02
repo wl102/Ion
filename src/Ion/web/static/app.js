@@ -119,7 +119,7 @@
     messages.appendChild(messagesEmpty);
 
     renderSessionList();
-    await loadTasks();
+    await Promise.all([loadTasks(), loadMessages()]);
 
     if (session.status === 'running') {
       connectSSE(sid);
@@ -421,6 +421,77 @@
       tasks = [];
       renderTasks();
     }
+  }
+
+  // ---- Messages history ----
+  async function loadMessages() {
+    if (!currentSid) return;
+    try {
+      const history = await api(`/api/sessions/${currentSid}/messages`);
+      if (!Array.isArray(history) || history.length === 0) return;
+      messagesEmpty.style.display = 'none';
+      for (const m of history) renderHistoricalMessage(m);
+      scrollToBottom();
+    } catch (err) {
+      console.error('Failed to load message history:', err);
+    }
+  }
+
+  function renderHistoricalMessage(m) {
+    if (m.role === 'assistant') {
+      if (m.reasoning_content) {
+        appendStaticMessage('reasoning', m.reasoning_content);
+      }
+      if (m.content) {
+        appendStaticMessage('assistant', m.content);
+      }
+    } else if (m.role === 'tool') {
+      appendStaticToolResult(m.tool_name || 'tool', m.content || '', m.duration_ms || 0);
+    } else if (m.role === 'user') {
+      appendStaticMessage('user', m.content || '');
+    } else if (m.role === 'system') {
+      appendStaticMessage('system', m.content || '');
+    }
+  }
+
+  function appendStaticMessage(role, text) {
+    messagesEmpty.style.display = 'none';
+    const div = document.createElement('div');
+    if (role === 'reasoning') {
+      div.className = 'msg msg-reasoning';
+      div.innerHTML = `
+        <div class="msg-label">reasoning</div>
+        <div class="msg-body">${esc(text)}</div>
+      `;
+    } else {
+      div.className = `msg msg-${role}`;
+      const labelMap = { user: 'you', assistant: 'agent', system: 'system', error: 'error' };
+      div.innerHTML = `
+        <div class="msg-label">${labelMap[role] || role}</div>
+        <div class="msg-body">${esc(text)}</div>
+      `;
+    }
+    messages.appendChild(div);
+  }
+
+  function appendStaticToolResult(toolName, result, durationMs) {
+    messagesEmpty.style.display = 'none';
+    const div = document.createElement('div');
+    div.className = 'msg msg-tool';
+    const truncResult = typeof result === 'string' && result.length > 500
+      ? result.slice(0, 500) + '...'
+      : result;
+    div.innerHTML = `
+      <div class="msg-label">tool</div>
+      <div class="msg-body">
+        <div class="tool-header">
+          <span class="tool-name">${esc(toolName)}</span>
+          <span class="tool-duration">${durationMs ? Math.round(durationMs) + 'ms' : ''}</span>
+        </div>
+        ${result ? `<div class="tool-result">${esc(truncResult)}</div>` : ''}
+      </div>
+    `;
+    messages.appendChild(div);
   }
 
   function handleTaskUpdate(payload) {

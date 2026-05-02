@@ -90,3 +90,25 @@ class AttackGraphOut(BaseModel):
 class LogsOut(BaseModel):
     files: list[str]
     content: dict[str, Any]
+
+
+# ---------------------------------------------------------------------------
+# Message (chat history) schemas
+# ---------------------------------------------------------------------------
+
+
+class MessageOut(BaseModel):
+    id: int
+    session_id: str
+    message_id: str = ""
+    role: str
+    content: Optional[str] = None
+    reasoning_content: Optional[str] = None
+    tool_calls: Optional[list[dict[str, Any]]] = None
+    tool_call_id: str = ""
+    tool_name: str = ""
+    duration_ms: float = 0.0
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

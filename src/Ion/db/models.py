@@ -5,6 +5,7 @@ from typing import Any, Optional, List
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -35,6 +36,9 @@ class SessionRecord(Base):
         back_populates="session", cascade="all, delete-orphan"
     )
     hooks: Mapped[List["HookRecord"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+    messages: Mapped[List["MessageRecord"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
 
@@ -114,3 +118,64 @@ class HookRecord(Base):
             "consumed": self.consumed,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class MessageRecord(Base):
+    """Persisted conversation message for a session.
+
+    Stores assistant/user/tool/system messages so a session's chat history
+    survives process restarts and can be displayed when the user re-opens
+    a session.
+    """
+
+    __tablename__ = "messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("sessions.id", ondelete="CASCADE"), index=True
+    )
+    # Stable identifier for grouping streamed chunks; empty for non-assistant.
+    message_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    role: Mapped[str] = mapped_column(String(16))  # system/user/assistant/tool
+    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reasoning_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Assistant tool_calls list (JSON-encoded) when role == "assistant".
+    tool_calls: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # For role == "tool"
+    tool_call_id: Mapped[str] = mapped_column(String(128), default="")
+    tool_name: Mapped[str] = mapped_column(String(128), default="")
+    duration_ms: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+
+    session: Mapped["SessionRecord"] = relationship(back_populates="messages")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "session_id": self.session_id,
+            "message_id": self.message_id,
+            "role": self.role,
+            "content": self.content,
+            "reasoning_content": self.reasoning_content,
+            "tool_calls": json.loads(self.tool_calls) if self.tool_calls else None,
+            "tool_call_id": self.tool_call_id,
+            "tool_name": self.tool_name,
+            "duration_ms": self.duration_ms,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+    def to_openai_message(self) -> dict[str, Any]:
+        """Reconstruct the message dict shape used by the OpenAI/IonAgent loop."""
+        msg: dict[str, Any] = {"role": self.role}
+        if self.content is not None:
+            msg["content"] = self.content
+        if self.reasoning_content:
+            msg["reasoning_content"] = self.reasoning_content
+        if self.tool_calls:
+            try:
+                msg["tool_calls"] = json.loads(self.tool_calls)
+            except json.JSONDecodeError:
+                pass
+        if self.role == "tool" and self.tool_call_id:
+            msg["tool_call_id"] = self.tool_call_id
+        return msg
