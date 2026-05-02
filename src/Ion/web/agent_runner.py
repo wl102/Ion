@@ -74,6 +74,7 @@ class WebAgentRunner:
             mode=mode,
             task_manager=task_manager,
             logger=logger,
+            verbose=False,
         )
         self.logger = logger
 

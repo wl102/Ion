@@ -236,10 +236,13 @@ def _run_subagent(
     # Record delegation for similarity guard
     _record_delegation(req.agent_name, req.goal, req.context)
 
-    print(f"\n[SubAgent: {agent_name}] Starting task: {req.goal}\n")
-
     # Pull parent callbacks (if any) so subagent streaming bubbles up to SSE
     parent_callbacks = _active_callbacks_ctx.get()
+    verbose = (parent_callbacks or {}).get("verbose", True)
+
+    if verbose:
+        print(f"\n[SubAgent: {agent_name}] Starting task: {req.goal}\n")
+
     if parent_callbacks:
         cb_start = parent_callbacks.get("on_subagent_start")
         if cb_start:
@@ -259,6 +262,7 @@ def _run_subagent(
             agent_name=agent_name,
             stop_conditions=req.stop_conditions,
             callbacks=parent_callbacks,
+            verbose=verbose,
         )
     except Exception as exc:
         sub_logger.log_subagent_finish(

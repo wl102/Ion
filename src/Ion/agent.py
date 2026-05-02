@@ -62,6 +62,7 @@ class IonAgent:
         # ---- Loop / context configuration ----
         max_turns: int = 0,
         context_max_tokens: int = 0,
+        verbose: bool = True,
     ):
         self.model_id = model_id or os.getenv("MODEL_ID", "")
         self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
@@ -70,6 +71,7 @@ class IonAgent:
         self.context_max_tokens = context_max_tokens or int(
             os.getenv("CONTEXT_MAX_TOKENS", "0")
         )
+        self.verbose = verbose
 
         if not self.model_id:
             raise ValueError("Missing MODEL_ID. Set env var or pass to constructor.")
@@ -192,6 +194,11 @@ class IonAgent:
             if st.messages and st.messages[0].get("role") == "system":
                 st.messages[0]["content"] = new_prompt
 
+        # Inject verbose flag into callbacks so sub-agents can inherit it
+        if callbacks is None:
+            callbacks = {}
+        callbacks.setdefault("verbose", self.verbose)
+
         run_agent_loop(
             self.client,
             self.model_id,
@@ -201,6 +208,7 @@ class IonAgent:
             on_before_turn=_on_before_turn,
             callbacks=callbacks,
             pause_check=pause_check,
+            verbose=self.verbose,
         )
 
         if self.logger:

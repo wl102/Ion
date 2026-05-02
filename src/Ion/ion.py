@@ -138,6 +138,12 @@ def _format_history_for_summary(messages: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
+def _vprint(verbose: bool, *args, **kwargs):
+    """Conditional print controlled by verbose flag."""
+    if verbose:
+        print(*args, **kwargs)
+
+
 def _compress_context(client, model_id: str, state: LoopState, logger=None):
     """
     Compress older conversation history by summarizing it via an LLM call.
@@ -244,6 +250,7 @@ def run_one_turn(
     logger=None,
     agent_name: str = "root",
     callbacks: Optional[dict[str, Any]] = None,
+    verbose: bool = True,
 ):
     prefix = f"[SubAgent: {agent_name}] " if agent_name != "root" else ""
     prefix_printed = False
@@ -296,14 +303,14 @@ def run_one_turn(
 
             if delta and delta.content:
                 if prefix and not prefix_printed:
-                    print(prefix, end="", flush=True)
+                    _vprint(verbose, prefix, end="", flush=True)
                     prefix_printed = True
                 text = delta.content
                 content_parts.append(text)
                 if reasoning:
                     reasoning = False
-                    print("\n</think>\n")
-                print(text, end="", flush=True)
+                    _vprint(verbose, "\n</think>\n")
+                _vprint(verbose, text, end="", flush=True)
                 if callbacks:
                     cb = callbacks.get("on_assistant_chunk")
                     if cb:
@@ -329,14 +336,14 @@ def run_one_turn(
                             tc["function"]["arguments"] += tc_delta.function.arguments
             if delta and hasattr(delta, "reasoning_content") and delta.reasoning_content:
                 if prefix and not prefix_printed:
-                    print(prefix, end="", flush=True)
+                    _vprint(verbose, prefix, end="", flush=True)
                     prefix_printed = True
                 text = delta.reasoning_content
                 reasoning_content_parts.append(text)
                 if not reasoning:
                     reasoning = True
-                    print("<think>\n")
-                print(text, end="", flush=True)
+                    _vprint(verbose, "<think>\n")
+                _vprint(verbose, text, end="", flush=True)
                 if callbacks:
                     cb = callbacks.get("on_assistant_chunk")
                     if cb:
@@ -346,9 +353,9 @@ def run_one_turn(
                 finish_reason = choice.finish_reason
 
         if reasoning_content_parts:
-            print()
+            _vprint(verbose)
         if content_parts:
-            print()
+            _vprint(verbose)
 
         reasoning_content = "".join(reasoning_content_parts)
         content = "".join(content_parts)
@@ -384,7 +391,7 @@ def run_one_turn(
         if finish_reason == "tool_calls":
             tool_names = [t["function"]["name"] for t in tool_calls_data]
             exec_prefix = f"[{agent_name}] " if agent_name != "root" else ""
-            print(f"{exec_prefix}🔧 Executing: {', '.join(tool_names)}")
+            _vprint(verbose, f"{exec_prefix}🔧 Executing: {', '.join(tool_names)}")
             if callbacks:
                 cb = callbacks.get("on_tool_start")
                 if cb:
@@ -396,10 +403,10 @@ def run_one_turn(
                     args = json.loads(tool["function"]["arguments"])
                 except json.JSONDecodeError as e:
                     # retry 3
-                    print(f"[ERROR]:{e}")
+                    _vprint(verbose, f"[ERROR]:{e}")
                     continue
                 except Exception as e:
-                    print(f"[ERROR]:{e}")
+                    _vprint(verbose, f"[ERROR]:{e}")
                     continue
                 start = time.time()
 
@@ -461,6 +468,7 @@ def run_agent_loop(
     agent_name: str = "root",
     callbacks: Optional[dict[str, Any]] = None,
     pause_check: Optional[callable] = None,
+    verbose: bool = True,
 ):
     """
     Run the agent loop until a non-tool-calls finish reason is reached.
@@ -473,6 +481,8 @@ def run_agent_loop(
         callbacks: Optional dict of callbacks for streaming events.
                    Supported keys: on_assistant_chunk, on_tool_start,
                    on_tool_result, on_turn_complete.
+        verbose: If True (default), print streaming output to stdout.
+                 Set to False to suppress stdout (e.g., web mode).
     """
     from Ion.observability import _observability_logger_ctx
 
@@ -497,7 +507,7 @@ def run_agent_loop(
 
             _check_and_inject_hooks(state)
 
-            run_one_turn(client, model_id, state, tools, logger, agent_name=agent_name, callbacks=callbacks)
+            run_one_turn(client, model_id, state, tools, logger, agent_name=agent_name, callbacks=callbacks, verbose=verbose)
 
             if callbacks:
                 cb = callbacks.get("on_turn_complete")
@@ -679,6 +689,7 @@ def run_subagent_loop(
     agent_name: str = "subagent",
     stop_conditions: Optional[Any] = None,
     callbacks: Optional[dict[str, Any]] = None,
+    verbose: bool = True,
 ) -> SubagentResult:
     """
     Run a controlled sub-agent loop with budget enforcement and anti-loop guards.
@@ -703,7 +714,7 @@ def run_subagent_loop(
                 _inject_termination_message(state, "max_turns_reached")
                 _force_final_turn(
                     client, model_id, state, tools, logger, agent_name,
-                    callbacks=callbacks,
+                    callbacks=callbacks, verbose=verbose,
                 )
                 return _extract_result(state, tracker, WhyStopped.MAX_TURNS)
 
@@ -718,7 +729,7 @@ def run_subagent_loop(
 
             run_one_turn(
                 client, model_id, state, tools, logger,
-                agent_name=agent_name, callbacks=callbacks,
+                agent_name=agent_name, callbacks=callbacks, verbose=verbose,
             )
 
             # --- track tool calls from the assistant message just produced ---
@@ -753,7 +764,7 @@ def run_subagent_loop(
                 _inject_termination_message(state, budget_violation)
                 _force_final_turn(
                     client, model_id, state, tools, logger, agent_name,
-                    callbacks=callbacks,
+                    callbacks=callbacks, verbose=verbose,
                 )
                 why = _map_violation_to_why(budget_violation)
                 return _extract_result(state, tracker, why)
@@ -802,13 +813,14 @@ def _force_final_turn(
     logger,
     agent_name: str,
     callbacks: Optional[dict[str, Any]] = None,
+    verbose: bool = True,
 ):
     """Run one final turn after forced termination to collect JSON output."""
     try:
         # Temporarily remove tools so the model can only output text
         run_one_turn(
             client, model_id, state, [], logger,
-            agent_name=agent_name, callbacks=callbacks,
+            agent_name=agent_name, callbacks=callbacks, verbose=verbose,
         )
     except Exception:
         pass
