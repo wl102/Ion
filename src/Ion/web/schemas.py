@@ -46,11 +46,12 @@ class HookRequest(BaseModel):
 
 
 class SSEEvent(BaseModel):
-    type: str  # system | assistant | tool_start | tool_result | task_update | hook_received | done | error
+    type: str  # system | assistant | tool_start | tool_result | task_update | hook_received | subagent_start | subagent_end | done | error
     payload: Any
     reasoning: bool = False
     tool_name: str = ""
     duration_ms: float = 0.0
+    agent_name: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

@@ -314,16 +314,41 @@
         break;
 
       case 'assistant':
-        appendMessage('assistant', evt.payload, { reasoning: evt.reasoning, messageId: evt.message_id });
+        appendMessage('assistant', evt.payload, {
+          reasoning: evt.reasoning,
+          messageId: evt.message_id,
+          agentName: evt.agent_name,
+        });
         break;
 
       case 'tool_start':
-        appendToolStart(evt.payload);
+        appendToolStart(evt.payload, { agentName: evt.agent_name });
         break;
 
       case 'tool_result':
-        appendToolResult(evt.tool_name, evt.payload, evt.duration_ms);
+        appendToolResult(evt.tool_name, evt.payload, evt.duration_ms, false, {
+          agentName: evt.agent_name,
+        });
         break;
+
+      case 'subagent_start':
+        appendMessage(
+          'system',
+          `→ 转交至子代理: ${evt.agent_name} — ${evt.payload || ''}`,
+          { agentName: evt.agent_name, handoff: 'in' }
+        );
+        break;
+
+      case 'subagent_end': {
+        const p = evt.payload || {};
+        const tail = p.summary ? `: ${p.summary}` : '';
+        appendMessage(
+          'system',
+          `← ${evt.agent_name} 完成 (${p.status || ''})${tail}`,
+          { agentName: evt.agent_name, handoff: 'out' }
+        );
+        break;
+      }
 
       case 'task_update':
         handleTaskUpdate(evt.payload);
@@ -362,7 +387,7 @@
     // so they share the same background; reasoning is just rendered with a
     // dimmer/italic style and is collapsible.
     if (role === 'assistant' && opts.messageId) {
-      const bubble = ensureAssistantBubble(opts.messageId, opts.historical);
+      const bubble = ensureAssistantBubble(opts.messageId, opts.historical, opts.agentName);
       if (opts.reasoning) {
         appendStreamText(ensureThinkingSection(bubble), text);
       } else {
@@ -374,8 +399,12 @@
     const div = document.createElement('div');
     div.className = `msg msg-${role}`;
     const labelMap = { user: 'you', assistant: 'agent', system: 'system', error: 'error' };
+    const isSubagent = opts.agentName && opts.agentName !== 'root';
+    const label = isSubagent ? opts.agentName : (labelMap[role] || role);
+    if (opts.agentName) div.dataset.agent = opts.agentName;
+    if (opts.handoff) div.dataset.handoff = opts.handoff;
     let html = `
-      <div class="msg-label">${labelMap[role] || role}</div>
+      <div class="msg-label">${esc(label)}</div>
       <div class="msg-body">${esc(text)}</div>
     `;
     if (!opts.historical) {
@@ -385,7 +414,7 @@
     messages.appendChild(div);
   }
 
-  function ensureAssistantBubble(messageId, historical) {
+  function ensureAssistantBubble(messageId, historical, agentName) {
     const safeId = String(messageId);
     let bubble = Array.from(messages.querySelectorAll('.msg-assistant'))
       .find(el => el.dataset.messageId === safeId);
@@ -393,8 +422,11 @@
     bubble = document.createElement('div');
     bubble.className = 'msg msg-assistant';
     bubble.dataset.messageId = safeId;
+    const isSubagent = agentName && agentName !== 'root';
+    const label = isSubagent ? agentName : 'agent';
+    if (agentName) bubble.dataset.agent = agentName;
     bubble.innerHTML = `
-      <div class="msg-label">agent</div>
+      <div class="msg-label">${esc(label)}</div>
       <div class="msg-body"></div>
     `;
     if (!historical) {
@@ -448,7 +480,7 @@
     node.textContent = raw.replace(/^\s+|\s+$/g, '');
   }
 
-  function appendToolStart(tools) {
+  function appendToolStart(tools, opts = {}) {
     messagesEmpty.style.display = 'none';
     const names = Array.isArray(tools) ? tools : [tools];
     for (const name of names) {
@@ -457,6 +489,7 @@
       det.dataset.open = 'false';
       det.dataset.toolName = name;
       det.dataset.pending = '1';
+      if (opts.agentName) det.dataset.agent = opts.agentName;
       det.innerHTML = renderToolSummary(name, 'running…') + `
         <div class="msg-tool-body">
           <div class="msg-tool-result msg-tool-result-empty">Awaiting result…</div>
@@ -466,7 +499,7 @@
     }
   }
 
-  function appendToolResult(toolName, result, durationMs, historical) {
+  function appendToolResult(toolName, result, durationMs, historical, opts = {}) {
     messagesEmpty.style.display = 'none';
     let det = !historical
       ? Array.from(messages.querySelectorAll('.msg-tool'))
@@ -477,10 +510,12 @@
       det.className = 'msg msg-tool';
       det.dataset.open = 'false';
       det.dataset.toolName = toolName;
+      if (opts.agentName) det.dataset.agent = opts.agentName;
       det.innerHTML = renderToolSummary(toolName, '') + `<div class="msg-tool-body"></div>`;
       messages.appendChild(det);
     } else {
       delete det.dataset.pending;
+      if (opts.agentName && !det.dataset.agent) det.dataset.agent = opts.agentName;
     }
     const dur = det.querySelector('.msg-tool-duration');
     if (dur) dur.textContent = durationMs ? `${Math.round(durationMs)}ms` : 'done';

@@ -2,6 +2,7 @@ import json
 import queue
 import re
 import time
+from contextvars import ContextVar
 from typing import Any, Optional, Literal
 
 from pydantic import BaseModel
@@ -14,6 +15,11 @@ from Ion.subagent_models import (
     SubagentStatus,
     WhyStopped,
     RecommendedOwner,
+)
+
+
+_active_callbacks_ctx: ContextVar[Optional[dict[str, Any]]] = ContextVar(
+    "_active_callbacks", default=None
 )
 
 
@@ -243,188 +249,192 @@ def run_one_turn(
     prefix_printed = False
     message_id: str | None = None
 
-    # Try streaming with usage; fall back if provider doesn't support stream_options.
+    _ctx_token = _active_callbacks_ctx.set(callbacks)
     try:
-        response = client.chat.completions.create(
-            model=model_id,
-            messages=state.messages,
-            tools=tools,
-            tool_choice="auto",
-            stream=True,
-            stream_options={"include_usage": True},
-        )
-    except Exception:
-        response = client.chat.completions.create(
-            model=model_id,
-            messages=state.messages,
-            tools=tools,
-            tool_choice="auto",
-            stream=True,
-        )
-
-    content_parts = []
-    reasoning_content_parts = []
-    tool_calls_map = {}
-    finish_reason = None
-    usage = None
-    reasoning = False
-
-    for chunk in response:
-        if message_id is None and hasattr(chunk, "id") and chunk.id:
-            message_id = chunk.id
-            if callbacks:
-                cb = callbacks.get("on_assistant_start")
-                if cb:
-                    cb(message_id)
-
-        choice = chunk.choices[0] if chunk.choices else None
-        if choice is None:
-            # usage-only chunk when stream_options is supported
-            if hasattr(chunk, "usage") and chunk.usage:
-                usage = chunk.usage
-            continue
-
-        delta = choice.delta
-
-        if delta and delta.content:
-            if prefix and not prefix_printed:
-                print(prefix, end="", flush=True)
-                prefix_printed = True
-            text = delta.content
-            content_parts.append(text)
-            if reasoning:
-                reasoning = False
-                print("\n</think>\n")
-            print(text, end="", flush=True)
-            if callbacks:
-                cb = callbacks.get("on_assistant_chunk")
-                if cb:
-                    cb(text, reasoning=False, message_id=message_id)
-        if delta and delta.tool_calls:
-            for tc_delta in delta.tool_calls:
-                idx = tc_delta.index
-                if idx not in tool_calls_map:
-                    tool_calls_map[idx] = {
-                        "id": "",
-                        "type": "function",
-                        "function": {"name": "", "arguments": ""},
-                    }
-                tc = tool_calls_map[idx]
-                if tc_delta.id:
-                    tc["id"] = tc_delta.id
-                if tc_delta.type:
-                    tc["type"] = tc_delta.type
-                if tc_delta.function:
-                    if tc_delta.function.name:
-                        tc["function"]["name"] = tc_delta.function.name
-                    if tc_delta.function.arguments:
-                        tc["function"]["arguments"] += tc_delta.function.arguments
-        if delta and hasattr(delta, "reasoning_content") and delta.reasoning_content:
-            if prefix and not prefix_printed:
-                print(prefix, end="", flush=True)
-                prefix_printed = True
-            text = delta.reasoning_content
-            reasoning_content_parts.append(text)
-            if not reasoning:
-                reasoning = True
-                print("<think>\n")
-            print(text, end="", flush=True)
-            if callbacks:
-                cb = callbacks.get("on_assistant_chunk")
-                if cb:
-                    cb(text, reasoning=True, message_id=message_id)
-
-        if choice.finish_reason is not None:
-            finish_reason = choice.finish_reason
-
-    if reasoning_content_parts:
-        print()
-    if content_parts:
-        print()
-
-    reasoning_content = "".join(reasoning_content_parts)
-    content = "".join(content_parts)
-    tool_calls_data = list(tool_calls_map.values())
-
-    # Fallback: minimax sometimes embeds tool calls as XML in content
-    if not tool_calls_data and content:
-        fallback_calls = _fallback_parse_xml_tool_calls(content)
-        if fallback_calls:
-            tool_calls_data = fallback_calls
-            finish_reason = "tool_calls"
-
-    if reasoning_content:
-        assistant_message = {
-            "role": "assistant",
-            "content": content or None,
-            "reasoning_content": reasoning_content or None,
-        }
-    else:
-        assistant_message = {
-            "role": "assistant",
-            "content": content or None,
-        }
-    if tool_calls_data:
-        assistant_message["tool_calls"] = tool_calls_data
-    state.messages.append(assistant_message)
-
-    if callbacks:
-        cb = callbacks.get("on_assistant_end")
-        if cb:
-            cb(message_id)
-
-    if finish_reason == "tool_calls":
-        tool_names = [t["function"]["name"] for t in tool_calls_data]
-        exec_prefix = f"[{agent_name}] " if agent_name != "root" else ""
-        print(f"{exec_prefix}🔧 Executing: {', '.join(tool_names)}")
-        if callbacks:
-            cb = callbacks.get("on_tool_start")
-            if cb:
-                cb(tool_names)
-
-        for tool in tool_calls_data:
-            name = tool["function"]["name"]
-            try:
-                args = json.loads(tool["function"]["arguments"])
-            except json.JSONDecodeError as e:
-                # retry 3
-                print(f"[ERROR]:{e}")
-                continue
-            except Exception as e:
-                print(f"[ERROR]:{e}")
-                continue
-            start = time.time()
-
-            output = dispatch(name, **args)
-            duration = (time.time() - start) * 1000
-
-            if logger:
-                logger.log_tool_call(name, args, output, duration)
-            if callbacks:
-                cb = callbacks.get("on_tool_result")
-                if cb:
-                    cb(name, output, duration)
-
-            state.messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool["id"],
-                    "content": output,
-                }
+        # Try streaming with usage; fall back if provider doesn't support stream_options.
+        try:
+            response = client.chat.completions.create(
+                model=model_id,
+                messages=state.messages,
+                tools=tools,
+                tool_choice="auto",
+                stream=True,
+                stream_options={"include_usage": True},
+            )
+        except Exception:
+            response = client.chat.completions.create(
+                model=model_id,
+                messages=state.messages,
+                tools=tools,
+                tool_choice="auto",
+                stream=True,
             )
 
-    state.turn_count += 1
-    state.finish_reason = finish_reason
+        content_parts = []
+        reasoning_content_parts = []
+        tool_calls_map = {}
+        finish_reason = None
+        usage = None
+        reasoning = False
 
-    if usage:
-        if logger:
-            logger.record_token_usage(usage.model_dump())
-        state.last_prompt_tokens = usage.prompt_tokens
-        state.last_message_count = len(state.messages)
-    elif logger and hasattr(response, "usage") and response.usage:
-        logger.record_token_usage(response.usage.model_dump())
-        state.last_prompt_tokens = response.usage.prompt_tokens
-        state.last_message_count = len(state.messages)
+        for chunk in response:
+            if message_id is None and hasattr(chunk, "id") and chunk.id:
+                message_id = chunk.id
+                if callbacks:
+                    cb = callbacks.get("on_assistant_start")
+                    if cb:
+                        cb(message_id, agent_name=agent_name)
+
+            choice = chunk.choices[0] if chunk.choices else None
+            if choice is None:
+                # usage-only chunk when stream_options is supported
+                if hasattr(chunk, "usage") and chunk.usage:
+                    usage = chunk.usage
+                continue
+
+            delta = choice.delta
+
+            if delta and delta.content:
+                if prefix and not prefix_printed:
+                    print(prefix, end="", flush=True)
+                    prefix_printed = True
+                text = delta.content
+                content_parts.append(text)
+                if reasoning:
+                    reasoning = False
+                    print("\n</think>\n")
+                print(text, end="", flush=True)
+                if callbacks:
+                    cb = callbacks.get("on_assistant_chunk")
+                    if cb:
+                        cb(text, reasoning=False, message_id=message_id, agent_name=agent_name)
+            if delta and delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in tool_calls_map:
+                        tool_calls_map[idx] = {
+                            "id": "",
+                            "type": "function",
+                            "function": {"name": "", "arguments": ""},
+                        }
+                    tc = tool_calls_map[idx]
+                    if tc_delta.id:
+                        tc["id"] = tc_delta.id
+                    if tc_delta.type:
+                        tc["type"] = tc_delta.type
+                    if tc_delta.function:
+                        if tc_delta.function.name:
+                            tc["function"]["name"] = tc_delta.function.name
+                        if tc_delta.function.arguments:
+                            tc["function"]["arguments"] += tc_delta.function.arguments
+            if delta and hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                if prefix and not prefix_printed:
+                    print(prefix, end="", flush=True)
+                    prefix_printed = True
+                text = delta.reasoning_content
+                reasoning_content_parts.append(text)
+                if not reasoning:
+                    reasoning = True
+                    print("<think>\n")
+                print(text, end="", flush=True)
+                if callbacks:
+                    cb = callbacks.get("on_assistant_chunk")
+                    if cb:
+                        cb(text, reasoning=True, message_id=message_id, agent_name=agent_name)
+
+            if choice.finish_reason is not None:
+                finish_reason = choice.finish_reason
+
+        if reasoning_content_parts:
+            print()
+        if content_parts:
+            print()
+
+        reasoning_content = "".join(reasoning_content_parts)
+        content = "".join(content_parts)
+        tool_calls_data = list(tool_calls_map.values())
+
+        # Fallback: minimax sometimes embeds tool calls as XML in content
+        if not tool_calls_data and content:
+            fallback_calls = _fallback_parse_xml_tool_calls(content)
+            if fallback_calls:
+                tool_calls_data = fallback_calls
+                finish_reason = "tool_calls"
+
+        if reasoning_content:
+            assistant_message = {
+                "role": "assistant",
+                "content": content or None,
+                "reasoning_content": reasoning_content or None,
+            }
+        else:
+            assistant_message = {
+                "role": "assistant",
+                "content": content or None,
+            }
+        if tool_calls_data:
+            assistant_message["tool_calls"] = tool_calls_data
+        state.messages.append(assistant_message)
+
+        if callbacks:
+            cb = callbacks.get("on_assistant_end")
+            if cb:
+                cb(message_id, agent_name=agent_name)
+
+        if finish_reason == "tool_calls":
+            tool_names = [t["function"]["name"] for t in tool_calls_data]
+            exec_prefix = f"[{agent_name}] " if agent_name != "root" else ""
+            print(f"{exec_prefix}🔧 Executing: {', '.join(tool_names)}")
+            if callbacks:
+                cb = callbacks.get("on_tool_start")
+                if cb:
+                    cb(tool_names, agent_name=agent_name)
+
+            for tool in tool_calls_data:
+                name = tool["function"]["name"]
+                try:
+                    args = json.loads(tool["function"]["arguments"])
+                except json.JSONDecodeError as e:
+                    # retry 3
+                    print(f"[ERROR]:{e}")
+                    continue
+                except Exception as e:
+                    print(f"[ERROR]:{e}")
+                    continue
+                start = time.time()
+
+                output = dispatch(name, **args)
+                duration = (time.time() - start) * 1000
+
+                if logger:
+                    logger.log_tool_call(name, args, output, duration)
+                if callbacks:
+                    cb = callbacks.get("on_tool_result")
+                    if cb:
+                        cb(name, output, duration, agent_name=agent_name)
+
+                state.messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool["id"],
+                        "content": output,
+                    }
+                )
+
+        state.turn_count += 1
+        state.finish_reason = finish_reason
+
+        if usage:
+            if logger:
+                logger.record_token_usage(usage.model_dump())
+            state.last_prompt_tokens = usage.prompt_tokens
+            state.last_message_count = len(state.messages)
+        elif logger and hasattr(response, "usage") and response.usage:
+            logger.record_token_usage(response.usage.model_dump())
+            state.last_prompt_tokens = response.usage.prompt_tokens
+            state.last_message_count = len(state.messages)
+    finally:
+        _active_callbacks_ctx.reset(_ctx_token)
 
 
 def _check_and_inject_hooks(state: LoopState):
@@ -668,6 +678,7 @@ def run_subagent_loop(
     on_before_turn=None,
     agent_name: str = "subagent",
     stop_conditions: Optional[Any] = None,
+    callbacks: Optional[dict[str, Any]] = None,
 ) -> SubagentResult:
     """
     Run a controlled sub-agent loop with budget enforcement and anti-loop guards.
@@ -690,7 +701,10 @@ def run_subagent_loop(
                 state.finish_reason = "max_turns_reached"
                 tracker.status_transitions.append("max_turns_reached")
                 _inject_termination_message(state, "max_turns_reached")
-                _force_final_turn(client, model_id, state, tools, logger, agent_name)
+                _force_final_turn(
+                    client, model_id, state, tools, logger, agent_name,
+                    callbacks=callbacks,
+                )
                 return _extract_result(state, tracker, WhyStopped.MAX_TURNS)
 
             # --- pre-turn context compression ---
@@ -702,7 +716,10 @@ def run_subagent_loop(
             if on_before_turn is not None:
                 on_before_turn(state)
 
-            run_one_turn(client, model_id, state, tools, logger, agent_name=agent_name)
+            run_one_turn(
+                client, model_id, state, tools, logger,
+                agent_name=agent_name, callbacks=callbacks,
+            )
 
             # --- track tool calls from the assistant message just produced ---
             if state.messages:
@@ -734,7 +751,10 @@ def run_subagent_loop(
             if budget_violation:
                 tracker.status_transitions.append(f"budget:{budget_violation}")
                 _inject_termination_message(state, budget_violation)
-                _force_final_turn(client, model_id, state, tools, logger, agent_name)
+                _force_final_turn(
+                    client, model_id, state, tools, logger, agent_name,
+                    callbacks=callbacks,
+                )
                 why = _map_violation_to_why(budget_violation)
                 return _extract_result(state, tracker, why)
 
@@ -775,12 +795,21 @@ def _inject_termination_message(state: LoopState, reason: str):
 
 
 def _force_final_turn(
-    client, model_id: str, state: LoopState, tools: list[dict], logger, agent_name: str
+    client,
+    model_id: str,
+    state: LoopState,
+    tools: list[dict],
+    logger,
+    agent_name: str,
+    callbacks: Optional[dict[str, Any]] = None,
 ):
     """Run one final turn after forced termination to collect JSON output."""
     try:
         # Temporarily remove tools so the model can only output text
-        run_one_turn(client, model_id, state, [], logger, agent_name=agent_name)
+        run_one_turn(
+            client, model_id, state, [], logger,
+            agent_name=agent_name, callbacks=callbacks,
+        )
     except Exception:
         pass
 

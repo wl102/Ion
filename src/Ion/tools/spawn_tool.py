@@ -212,7 +212,7 @@ def _run_subagent(
         {"role": "user", "content": req.goal},
     ]
 
-    from Ion.ion import LoopState, run_subagent_loop
+    from Ion.ion import LoopState, run_subagent_loop, _active_callbacks_ctx
 
     state = LoopState(
         messages=messages,
@@ -238,6 +238,16 @@ def _run_subagent(
 
     print(f"\n[SubAgent: {agent_name}] Starting task: {req.goal}\n")
 
+    # Pull parent callbacks (if any) so subagent streaming bubbles up to SSE
+    parent_callbacks = _active_callbacks_ctx.get()
+    if parent_callbacks:
+        cb_start = parent_callbacks.get("on_subagent_start")
+        if cb_start:
+            try:
+                cb_start(agent_name=agent_name, goal=req.goal)
+            except Exception:
+                pass
+
     try:
         result: SubagentResult = run_subagent_loop(
             client,
@@ -248,6 +258,7 @@ def _run_subagent(
             logger=sub_logger,
             agent_name=agent_name,
             stop_conditions=req.stop_conditions,
+            callbacks=parent_callbacks,
         )
     except Exception as exc:
         sub_logger.log_subagent_finish(
@@ -260,6 +271,18 @@ def _run_subagent(
             status=SubagentStatus.FAILED,
             summary=f"Subagent crashed: {exc}",
         )
+
+    if parent_callbacks:
+        cb_end = parent_callbacks.get("on_subagent_end")
+        if cb_end:
+            try:
+                cb_end(
+                    agent_name=agent_name,
+                    summary=result.summary,
+                    status=result.status.value,
+                )
+            except Exception:
+                pass
 
     # Merge loop state into result for observability
     sub_logger.log_subagent_finish(

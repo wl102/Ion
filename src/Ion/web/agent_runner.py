@@ -154,19 +154,35 @@ class WebAgentRunner:
             if self.sse_queue is not None:
                 asyncio.run_coroutine_threadsafe(self.sse_queue.put(event), loop)
 
-        def on_assistant_start(message_id: str):
+        def on_assistant_start(message_id: str, agent_name: str = "root", **_):
             self._assistant_buffers[message_id or ""] = _AssistantBuffer()
-            put_event({"type": "assistant_start", "message_id": message_id})
+            put_event({
+                "type": "assistant_start",
+                "message_id": message_id,
+                "agent_name": agent_name,
+            })
 
-        def on_assistant_chunk(text: str, reasoning: bool = False, message_id: str = ""):
+        def on_assistant_chunk(
+            text: str,
+            reasoning: bool = False,
+            message_id: str = "",
+            agent_name: str = "root",
+            **_,
+        ):
             buf = self._assistant_buffers.get(message_id or "")
             if buf is None:
                 buf = _AssistantBuffer()
                 self._assistant_buffers[message_id or ""] = buf
             (buf.reasoning if reasoning else buf.content).append(text)
-            put_event({"type": "assistant", "payload": text, "reasoning": reasoning, "message_id": message_id})
+            put_event({
+                "type": "assistant",
+                "payload": text,
+                "reasoning": reasoning,
+                "message_id": message_id,
+                "agent_name": agent_name,
+            })
 
-        def on_assistant_end(message_id: str):
+        def on_assistant_end(message_id: str, agent_name: str = "root", **_):
             buf = self._assistant_buffers.pop(message_id or "", None)
             if buf is not None:
                 content = "".join(buf.content) or None
@@ -178,12 +194,26 @@ class WebAgentRunner:
                         reasoning_content=reasoning,
                         message_id=message_id or "",
                     )
-            put_event({"type": "assistant_end", "message_id": message_id})
+            put_event({
+                "type": "assistant_end",
+                "message_id": message_id,
+                "agent_name": agent_name,
+            })
 
-        def on_tool_start(names: list[str]):
-            put_event({"type": "tool_start", "payload": names})
+        def on_tool_start(names: list[str], agent_name: str = "root", **_):
+            put_event({
+                "type": "tool_start",
+                "payload": names,
+                "agent_name": agent_name,
+            })
 
-        def on_tool_result(name: str, output: str, duration_ms: float):
+        def on_tool_result(
+            name: str,
+            output: str,
+            duration_ms: float,
+            agent_name: str = "root",
+            **_,
+        ):
             # Persist full tool output (no truncation in DB).
             self._persist_message(
                 role="tool",
@@ -199,8 +229,28 @@ class WebAgentRunner:
                     "payload": payload,
                     "tool_name": name,
                     "duration_ms": round(duration_ms, 2),
+                    "agent_name": agent_name,
                 }
             )
+
+        def on_subagent_start(agent_name: str, goal: str = "", **_):
+            put_event({
+                "type": "subagent_start",
+                "agent_name": agent_name,
+                "payload": goal,
+            })
+
+        def on_subagent_end(
+            agent_name: str,
+            summary: str = "",
+            status: str = "",
+            **_,
+        ):
+            put_event({
+                "type": "subagent_end",
+                "agent_name": agent_name,
+                "payload": {"summary": summary, "status": status},
+            })
 
         def on_turn_complete(turn_count: int, finish_reason: str | None):
             tasks = self.agent.task_manager.list_tasks()
@@ -222,6 +272,8 @@ class WebAgentRunner:
             "on_assistant_end": on_assistant_end,
             "on_tool_start": on_tool_start,
             "on_tool_result": on_tool_result,
+            "on_subagent_start": on_subagent_start,
+            "on_subagent_end": on_subagent_end,
             "on_turn_complete": on_turn_complete,
         }
 

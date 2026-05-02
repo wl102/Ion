@@ -12,6 +12,10 @@
   --accent-glow: rgba(16,185,129,0.25);
   --danger: #ef4444;
   --danger-dim: rgba(239,68,68,0.15);
+  --accent-subagent: #a78bfa;
+  --accent-subagent-dim: rgba(167,139,250,0.18);
+  --accent-handoff-in: #a78bfa;
+  --accent-handoff-out: #34d399;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   --radius: 12px;
@@ -520,6 +524,38 @@ html, body {
 }
 
 .msg-user .msg-time { text-align: right; }
+
+/* ---- Subagent visual attribution ----
+   Messages from a non-root agent get a left color bar + indent so users see
+   a visible "agent transfer" boundary in the chat stream. */
+.msg[data-agent]:not([data-agent="root"]) {
+  border-left: 2px solid var(--accent-subagent);
+  padding-left: 10px;
+  margin-left: 16px;
+  background: linear-gradient(
+    90deg,
+    var(--accent-subagent-dim) 0%,
+    transparent 24px
+  );
+  border-radius: 4px;
+}
+.msg[data-agent]:not([data-agent="root"]) .msg-label {
+  color: var(--accent-subagent);
+  font-weight: 600;
+}
+.msg[data-handoff="in"] .msg-body {
+  color: var(--accent-handoff-in);
+  border-left: 2px solid var(--accent-handoff-in);
+  padding-left: 10px;
+}
+.msg[data-handoff="out"] .msg-body {
+  color: var(--accent-handoff-out);
+  border-left: 2px solid var(--accent-handoff-out);
+  padding-left: 10px;
+}
+.msg[data-handoff] .msg-body {
+  text-align: left;
+}
 
 /* Tool call: collapsible card. We use a plain <div> with data-open attribute
    instead of <details>/<summary> because Chromium has a layout quirk where two
