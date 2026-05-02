@@ -39,6 +39,11 @@ class Task(BaseModel):
     information_score: int = Field(default=0, ge=0, le=10)
     # intelligence_source: brief note on what finding triggered this task
     intelligence_source: str = ""
+    # execution_notes: running log of key observations, failures, and pivot decisions
+    # Populated by add_task_note during task execution for later reflection
+    execution_notes: list[str] = Field(default_factory=list)
+    # key_findings: high-signal outputs or discoveries from this task
+    key_findings: list[str] = Field(default_factory=list)
 
     def model_post_init(self, __context):
         self.updated_at = datetime.now().isoformat()
@@ -107,6 +112,40 @@ class TaskManager:
 
     def kill_task(self, task_id: str) -> Optional[Task]:
         return self.update_status(task_id, TaskStatus.KILLED)
+
+    def add_task_note(
+        self,
+        task_id: str,
+        note: str = "",
+        finding: str = "",
+    ) -> Optional[Task]:
+        """Append an execution note or key finding to a task."""
+        task = self._tasks.get(task_id)
+        if task is None:
+            return None
+        if note:
+            task.execution_notes.append(note)
+        if finding:
+            task.key_findings.append(finding)
+        task.updated_at = datetime.now().isoformat()
+        return task
+
+    def get_task_reflection_data(self, task_id: str) -> Optional[dict]:
+        """Return structured reflection material for a completed task."""
+        task = self._tasks.get(task_id)
+        if task is None:
+            return None
+        return {
+            "id": task.id,
+            "name": task.name,
+            "description": task.description,
+            "status": task.status.value,
+            "result": task.result,
+            "attempts": task.attempt_count,
+            "execution_notes": task.execution_notes,
+            "key_findings": task.key_findings,
+            "intelligence_source": task.intelligence_source,
+        }
 
     def attack_graph_view(self) -> str:
         if not self._tasks:
@@ -199,7 +238,98 @@ def _update_task(task_manager, task_id, status, result):
     updated = task_manager.update_status(task_id, st, result)
     if updated is None:
         return tool_error(f"Task {task_id} not found")
-    return tool_result(success=True, output=f"Task {task_id} updated to {status}")
+
+    output = f"Task {task_id} updated to {status}"
+
+    # Trigger self-improvement reflection when a task reaches a terminal state
+    if st in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+        output += (
+            f"\n\n🧠 SELF-IMPROVEMENT TRIGGER — Task '{updated.name}' is now {status.upper()}.\n"
+            f"Before proceeding, ask yourself:\n"
+            f"1. Was this a non-trivial workflow worth preserving as a skill?\n"
+            f"2. Were there reusable patterns, techniques, or failure lessons?\n"
+            f"3. Did you discover a novel tool combination or approach?\n"
+            f"4. Would a skill have helped you solve this faster?\n\n"
+        )
+        if st == TaskStatus.COMPLETED:
+            output += (
+                "If YES to any → Use `skill_manage` (create/patch) to save this knowledge NOW.\n"
+                "If unsure → Use `reflect_on_task` with this task_id to structure your reflection."
+            )
+        else:
+            output += (
+                "Failure is intelligence. If the failure reveals a reusable pitfall or anti-pattern,\n"
+                "save it as a skill (e.g., name it `xxx-anti-pattern`) so future tasks avoid the same trap.\n"
+                "Use `reflect_on_task` with this task_id to review what went wrong."
+            )
+
+    return tool_result(success=True, output=output)
+
+
+def _reflect_on_task(task_manager, task_id):
+    """Structured reflection on a completed or failed task to distill experience."""
+    data = task_manager.get_task_reflection_data(task_id)
+    if data is None:
+        return tool_error(f"Task {task_id} not found")
+
+    lines = [
+        f"## Task Reflection: {data['name']}",
+        f"",
+        f"**ID:** {data['id']}",
+        f"**Description:** {data['description']}",
+        f"**Status:** {data['status']}",
+        f"**Result:** {data['result'] or '(no result recorded)'}",
+        f"**Attempts:** {data['attempts']}",
+    ]
+
+    if data['intelligence_source']:
+        lines.append(f"**Intelligence Source:** {data['intelligence_source']}")
+
+    notes = data.get('execution_notes', [])
+    if notes:
+        lines.append(f"\n### Execution Notes ({len(notes)})")
+        for i, note in enumerate(notes, 1):
+            lines.append(f"{i}. {note}")
+
+    findings = data.get('key_findings', [])
+    if findings:
+        lines.append(f"\n### Key Findings ({len(findings)})")
+        for i, finding in enumerate(findings, 1):
+            lines.append(f"{i}. {finding}")
+
+    lines.extend([
+        "",
+        "### Reflection Prompts (answer these to decide if a skill is warranted)",
+        "1. What was the core challenge? Was it domain-specific or generalizable?",
+        "2. What approach ultimately worked? Can it be abstracted into a reusable workflow?",
+        "3. What failed approaches taught you something important?",
+        "4. Were there specific tool parameters, combinations, or sequences that mattered?",
+        "5. If you faced this exact scenario again, would a skill help?",
+        "",
+        "### Next Step",
+        "If this task contains reusable knowledge, use `skill_manage` (action=create) to save it. "
+        "If a similar skill already exists, use `skill_manage` (action=patch) to enrich it.",
+    ])
+
+    return tool_result(success=True, output="\n".join(lines))
+
+
+def _add_task_note(task_manager, task_id, note, finding):
+    """Append an execution note or key finding to a running task."""
+    if not note and not finding:
+        return tool_error("Either 'note' or 'finding' must be provided")
+    updated = task_manager.add_task_note(task_id, note=note or "", finding=finding or "")
+    if updated is None:
+        return tool_error(f"Task {task_id} not found")
+    parts = []
+    if note:
+        parts.append("note added")
+    if finding:
+        parts.append("finding recorded")
+    return tool_result(
+        success=True,
+        output=f"Task {task_id}: {' and '.join(parts)}. Total notes: {len(updated.execution_notes)}, findings: {len(updated.key_findings)}.",
+    )
 
 
 def _delete_task(task_manager, task_id):
@@ -288,6 +418,26 @@ def register_task_tools(task_manager):
         handler=lambda **kw: _attack_graph_view(task_manager),
         description="View the attack graph as a tree structure.",
         emoji="🌳",
+    )
+
+    registry.register(
+        name="reflect_on_task",
+        toolset="task",
+        schema=REFLECT_ON_TASK_SCHEMA,
+        handler=lambda task_id, **kw: _reflect_on_task(task_manager, task_id),
+        description="Reflect on a completed/failed task to decide if experience should be saved as a skill.",
+        emoji="🧠",
+    )
+
+    registry.register(
+        name="add_task_note",
+        toolset="task",
+        schema=ADD_TASK_NOTE_SCHEMA,
+        handler=lambda task_id, note="", finding="", **kw: _add_task_note(
+            task_manager, task_id, note, finding
+        ),
+        description="Record execution notes and key findings while a task is running.",
+        emoji="📝",
     )
 
 
@@ -384,6 +534,60 @@ ATTACK_GRAPH_VIEW_SCHEMA = {
     },
 }
 
+REFLECT_ON_TASK_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "reflect_on_task",
+        "description": (
+            "Structured reflection on a completed or failed task to distill experience. "
+            "Use this AFTER marking a task completed/failed to decide whether the knowledge "
+            "is worth saving as a skill. The tool returns execution notes, key findings, and "
+            "reflection prompts that guide you toward creating a high-quality skill."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "The task ID to reflect on",
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
+}
+
+ADD_TASK_NOTE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "add_task_note",
+        "description": (
+            "Record an execution note or key finding while a task is running. "
+            "Use this during task execution to capture observations, failures, pivot decisions, "
+            "and discoveries. These notes become the raw material for later reflection when the task completes. "
+            "Call this after every significant tool call or discovery."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "The task ID to annotate",
+                },
+                "note": {
+                    "type": "string",
+                    "description": "An execution note (e.g., 'Tried SQLi on login form, filtered by WAF. Pivoting to blind SQLi.')",
+                },
+                "finding": {
+                    "type": "string",
+                    "description": "A high-signal finding (e.g., 'Found hardcoded API key in /js/app.js: sk-abc123')",
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
+}
+
 
 # ---------------------------------------------------------------------------
 # Persistent TaskManager backed by SQLAlchemy
@@ -423,6 +627,8 @@ class PersistentTaskManager(TaskManager):
                     max_attempts=task.max_attempts,
                     information_score=task.information_score,
                     intelligence_source=task.intelligence_source,
+                    execution_notes=json.dumps(task.execution_notes),
+                    key_findings=json.dumps(task.key_findings),
                 )
                 sess.add(record)
             else:
@@ -436,6 +642,8 @@ class PersistentTaskManager(TaskManager):
                 existing.max_attempts = task.max_attempts
                 existing.information_score = task.information_score
                 existing.intelligence_source = task.intelligence_source
+                existing.execution_notes = json.dumps(task.execution_notes)
+                existing.key_findings = json.dumps(task.key_findings)
             sess.commit()
 
     def _delete_from_db(self, task_id: str):
@@ -451,6 +659,17 @@ class PersistentTaskManager(TaskManager):
         result = super().add_task(task)
         self._sync_task(result)
         return result
+
+    def add_task_note(
+        self,
+        task_id: str,
+        note: str = "",
+        finding: str = "",
+    ) -> Optional[Task]:
+        updated = super().add_task_note(task_id, note, finding)
+        if updated is not None:
+            self._sync_task(updated)
+        return updated
 
     def update_status(
         self, task_id: str, status: TaskStatus, result: Optional[str] = None
@@ -486,6 +705,8 @@ class PersistentTaskManager(TaskManager):
                     max_attempts=r.max_attempts,
                     information_score=r.information_score,
                     intelligence_source=r.intelligence_source,
+                    execution_notes=json.loads(r.execution_notes) if r.execution_notes else [],
+                    key_findings=json.loads(r.key_findings) if r.key_findings else [],
                 )
                 self._tasks[task.id] = task
         self._loaded = True

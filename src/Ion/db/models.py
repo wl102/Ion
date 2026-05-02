@@ -71,6 +71,8 @@ class TaskRecord(Base):
     max_attempts: Mapped[int] = mapped_column(Integer, default=1)
     information_score: Mapped[int] = mapped_column(Integer, default=0)
     intelligence_source: Mapped[str] = mapped_column(Text, default="")
+    execution_notes: Mapped[str] = mapped_column(Text, default="[]")
+    key_findings: Mapped[str] = mapped_column(Text, default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=func.now(), onupdate=func.now()
@@ -92,6 +94,8 @@ class TaskRecord(Base):
             "max_attempts": self.max_attempts,
             "information_score": self.information_score,
             "intelligence_source": self.intelligence_source,
+            "execution_notes": json.loads(self.execution_notes) if self.execution_notes else [],
+            "key_findings": json.loads(self.key_findings) if self.key_findings else [],
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

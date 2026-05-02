@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, Session
 
 from .models import Base
@@ -35,8 +35,39 @@ class Database:
             db.close()
 
     def init_db(self):
-        """Create all tables."""
+        """Create all tables and run lightweight migrations."""
         Base.metadata.create_all(bind=self.engine)
+        self._migrate()
+
+    def _migrate(self):
+        """Lightweight auto-migration: add columns that exist in models but not in DB."""
+        try:
+            from .models import TaskRecord
+
+            inspector = inspect(self.engine)
+            existing_cols = {c["name"] for c in inspector.get_columns("tasks")}
+            expected_cols = {c.name for c in TaskRecord.__table__.columns}
+            missing = expected_cols - existing_cols
+
+            if missing:
+                with self.engine.begin() as conn:
+                    for col_name in missing:
+                        col = TaskRecord.__table__.columns[col_name]
+                        # Build a dialect-aware ADD COLUMN statement
+                        col_type = col.type.compile(dialect=self.engine.dialect)
+                        default = ""
+                        if col.default is not None and hasattr(col.default, "arg"):
+                            default_val = col.default.arg
+                            if isinstance(default_val, str):
+                                default = f" DEFAULT '{default_val}'"
+                            else:
+                                default = f" DEFAULT {default_val}"
+                        nullable = "" if not col.nullable else ""
+                        sql = f'ALTER TABLE tasks ADD COLUMN {col_name} {col_type}{default}{nullable}'
+                        conn.execute(text(sql))
+        except Exception:
+            # Best-effort: if migration fails, log and continue
+            pass
 
 
 # Singleton default instance

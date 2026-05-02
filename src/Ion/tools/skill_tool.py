@@ -183,10 +183,13 @@ SKILL_MANAGE_SCHEMA = {
     "function": {
         "name": "skill_manage",
         "description": (
-            "Create, update, or delete agent-managed skills. This is the agent's procedural memory — "
-            "when it figures out a non-trivial workflow, it saves the approach as a skill for future reuse. "
-            "Actions: create (new skill), patch (targeted edit), edit (full replace), delete (remove), "
-            "write_file (add supporting file), remove_file (delete supporting file)."
+            "YOUR PROCEDURAL MEMORY — use this to save experience from completed tasks so future you "
+            "does not have to rediscover the same knowledge. This is how you self-improve over time. "
+            "When a task reveals a reusable workflow, technique, failure pattern, or tool combination, "
+            "capture it as a skill immediately while the details are fresh. "
+            "Actions: create (new skill from scratch), patch (add a section/example to existing skill), "
+            "edit (full replace), delete (remove), write_file (add supporting script/reference), remove_file. "
+            "For 'create', write a complete SKILL.md with frontmatter (name, description, metadata) and actionable body."
         ),
         "parameters": {
             "type": "object",
@@ -194,35 +197,45 @@ SKILL_MANAGE_SCHEMA = {
                 "action": {
                     "type": "string",
                     "enum": ["create", "patch", "edit", "delete", "write_file", "remove_file"],
-                    "description": "The management action to perform",
+                    "description": (
+                        "create = new skill from a full SKILL.md; "
+                        "patch = targeted edit (add a pitfall, example, or section to existing skill); "
+                        "edit = full replace of SKILL.md; "
+                        "delete = remove skill entirely; "
+                        "write_file = add a supporting script/reference file; "
+                        "remove_file = delete a supporting file"
+                    ),
                 },
                 "name": {
                     "type": "string",
-                    "description": "Name of the skill to manage",
+                    "description": "Skill name (kebab-case, e.g., 'jwt-auth-bypass', 'sqlmap-tamper-guide')",
                 },
                 "content": {
                     "type": "string",
-                    "description": "Full SKILL.md content (for create or edit)",
+                    "description": (
+                        "Full SKILL.md content for create/edit. Must include YAML frontmatter with 'name' and 'description', "
+                        "followed by a body with: When to use, Step-by-step workflow, Concrete examples, Pitfalls & lessons learned."
+                    ),
                 },
                 "category": {
                     "type": "string",
-                    "description": "Optional category directory for the skill (e.g., 'exploitation')",
+                    "description": "Optional category directory for the skill (e.g., 'exploitation', 'reconnaissance')",
                 },
                 "old_string": {
                     "type": "string",
-                    "description": "Text to replace (for patch action)",
+                    "description": "Exact text to locate and replace (for patch action). Must be unique within the SKILL.md.",
                 },
                 "new_string": {
                     "type": "string",
-                    "description": "Replacement text (for patch action)",
+                    "description": "Replacement text that will be inserted in place of old_string (for patch action)",
                 },
                 "file_path": {
                     "type": "string",
-                    "description": "Relative path within the skill directory (for write_file / remove_file)",
+                    "description": "Relative path within the skill directory (for write_file / remove_file, e.g., 'scripts/scan.py')",
                 },
                 "file_content": {
                     "type": "string",
-                    "description": "Content to write (for write_file)",
+                    "description": "Content to write for write_file action",
                 },
             },
             "required": ["action", "name"],
