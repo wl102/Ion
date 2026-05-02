@@ -18,6 +18,10 @@
   const sessionList = $('#session-list');
   const welcome = $('#welcome');
   const sessionView = $('#session-view');
+  const welcomeQuery = $('#welcome-query');
+  const welcomeMode = $('#welcome-mode');
+  const btnWelcomeSubmit = $('#btn-welcome-submit');
+  const welcomeSubmitLabel = $('#welcome-submit-label');
   const topbarTitle = $('#topbar-title');
   const topbarSubtitle = $('#topbar-subtitle');
   const topbarStatus = $('#topbar-status');
@@ -140,7 +144,7 @@
       body: JSON.stringify({ title, mode, query }),
     });
     await loadSessions();
-    selectSession(session.id);
+    await selectSession(session.id);
     return session;
   }
 
@@ -241,6 +245,52 @@
   function showWelcome() {
     welcome.classList.remove('hidden');
     sessionView.classList.add('hidden');
+    resetWelcomeForm();
+    if (welcomeQuery) welcomeQuery.focus();
+  }
+
+  function resetWelcomeForm() {
+    if (!welcomeQuery) return;
+    welcomeQuery.value = '';
+    welcomeQuery.disabled = false;
+    welcomeMode.disabled = false;
+    btnWelcomeSubmit.disabled = false;
+    welcomeSubmitLabel.textContent = 'Start Session';
+  }
+
+  function setWelcomeBusy(busy) {
+    if (!welcomeQuery) return;
+    welcomeQuery.disabled = busy;
+    welcomeMode.disabled = busy;
+    btnWelcomeSubmit.disabled = busy;
+    welcomeSubmitLabel.textContent = busy ? 'Creating session…' : 'Start Session';
+  }
+
+  async function startSessionFromWelcome() {
+    const query = welcomeQuery.value.trim();
+    const mode = welcomeMode.value || 'general';
+    if (!query) {
+      toast('Please describe your task first', 'error');
+      welcomeQuery.focus();
+      return;
+    }
+
+    setWelcomeBusy(true);
+    let session;
+    try {
+      session = await createSession('', mode, query);
+    } catch (err) {
+      toast(err.message || 'Failed to create session', 'error');
+      setWelcomeBusy(false);
+      return;
+    }
+
+    // createSession already called selectSession, so the session view is up.
+    // Now kick off the agent run with the user's query.
+    if (currentSid === session.id) {
+      await runAgent(query);
+    }
+    resetWelcomeForm();
   }
 
   function showRunningUI() {
@@ -996,18 +1046,26 @@
 
   // ---- Event Bindings ----
   function bindEvents() {
-    const openNewModal = () => {
-      $('#new-title').value = '';
-      $('#new-query').value = '';
-      $('#new-mode').value = 'security';
-      $('#modal-new').classList.remove('hidden');
-      $('#new-title').focus();
+    const goToWelcome = () => {
+      disconnectSSE();
+      currentSid = null;
+      currentSession = null;
+      selectedTaskId = null;
+      tasks = [];
+      renderSessionList();
+      showWelcome();
     };
 
-    $('#btn-new-session').addEventListener('click', openNewModal);
-    $('#btn-welcome-new').addEventListener('click', openNewModal);
-    $('#btn-modal-close').addEventListener('click', () => $('#modal-new').classList.add('hidden'));
-    $('#btn-modal-cancel').addEventListener('click', () => $('#modal-new').classList.add('hidden'));
+    $('#btn-new-session').addEventListener('click', goToWelcome);
+
+    btnWelcomeSubmit.addEventListener('click', () => startSessionFromWelcome());
+
+    welcomeQuery.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        startSessionFromWelcome();
+      }
+    });
 
     // Toggle tool-call collapsibles. We use a div + data-open attribute instead
     // of <details>/<summary> because nesting two <details> styles in the same
@@ -1019,26 +1077,6 @@
       const tool = summary.closest('.msg-tool');
       if (!tool) return;
       tool.dataset.open = tool.dataset.open === 'true' ? 'false' : 'true';
-    });
-
-    $('#modal-new').addEventListener('click', (e) => {
-      if (e.target === $('#modal-new')) $('#modal-new').classList.add('hidden');
-    });
-
-    $('#btn-modal-create').addEventListener('click', async () => {
-      const title = $('#new-title').value.trim();
-      const mode = $('#new-mode').value;
-      const query = $('#new-query').value.trim();
-      if (!query) { toast('Query is required', 'error'); return; }
-      try {
-        $('#btn-modal-create').disabled = true;
-        await createSession(title, mode, query);
-        $('#modal-new').classList.add('hidden');
-      } catch (err) {
-        toast(err.message, 'error');
-      } finally {
-        $('#btn-modal-create').disabled = false;
-      }
     });
 
     btnRun.addEventListener('click', () => {

@@ -36,16 +36,38 @@
     <main class="main">
       <!-- No Session Selected -->
       <div class="welcome" id="welcome">
-        <div class="welcome-inner">
-          <svg class="welcome-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-          </svg>
-          <h2>Ion Security Agent</h2>
-          <p>Create a new session or select an existing one to start.</p>
-          <button class="btn-primary" id="btn-welcome-new">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            New Session
-          </button>
+        <div class="welcome-card">
+          <div class="welcome-header">
+            <svg class="welcome-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            <h2>Ion Security Agent</h2>
+            <p>Describe your task — a session is created automatically.</p>
+          </div>
+          <div class="welcome-form">
+            <div class="welcome-row">
+              <label class="welcome-mode-label" for="welcome-mode">MODE</label>
+              <select id="welcome-mode" class="welcome-mode-select">
+                <option value="general">General</option>
+                <option value="security" selected>Security</option>
+                <option value="ctf">CTF</option>
+              </select>
+            </div>
+            <textarea
+              id="welcome-query"
+              class="welcome-query"
+              rows="4"
+              placeholder="e.g. Scan 192.168.1.1:6379 for known Redis vulnerabilities..."
+              autocomplete="off"
+            ></textarea>
+            <div class="welcome-actions">
+              <span class="welcome-hint" id="welcome-hint">Enter to send · Shift+Enter for newline</span>
+              <button class="btn-primary welcome-submit" id="btn-welcome-submit">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                <span id="welcome-submit-label">Start Session</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -166,34 +188,6 @@
         </div>
       </div>
     </main>
-  </div>
-
-  <!-- New Session Modal -->
-  <div class="modal-overlay hidden" id="modal-new">
-    <div class="modal">
-      <div class="modal-header">
-        <h3>New Session</h3>
-        <button class="btn-icon" id="btn-modal-close">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-      <div class="modal-body">
-        <label class="form-label">Title</label>
-        <input type="text" id="new-title" class="form-input" placeholder="Redis scan, Web pentest...">
-        <label class="form-label">Mode</label>
-        <select id="new-mode" class="form-input">
-          <option value="general">General</option>
-          <option value="security">Security</option>
-          <option value="ctf">CTF</option>
-        </select>
-        <label class="form-label">Query</label>
-        <textarea id="new-query" class="form-input" rows="3" placeholder="Scan 192.168.1.1:6379 for vulnerabilities..."></textarea>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-ghost" id="btn-modal-cancel">Cancel</button>
-        <button class="btn-primary" id="btn-modal-create">Create Session</button>
-      </div>
-    </div>
   </div>
 
   <!-- Attack Graph Modal -->
