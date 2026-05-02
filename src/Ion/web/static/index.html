@@ -57,15 +57,21 @@
             <button class="btn-icon mobile-only" id="btn-toggle-sidebar">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
             </button>
-            <div class="topbar-info">
-              <h2 class="topbar-title" id="topbar-title">Session</h2>
-              <span class="topbar-status" id="topbar-status">idle</span>
+            <div class="atlas-brand">
+              <div class="atlas-brand-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </div>
+              <div class="atlas-brand-text">
+                <h2 class="atlas-brand-title" id="topbar-title">EXPLOIT CHAIN ATLAS</h2>
+                <p class="atlas-brand-sub" id="topbar-subtitle">Session • idle</p>
+              </div>
             </div>
+            <span class="topbar-status" id="topbar-status">idle</span>
           </div>
           <div class="topbar-actions">
-            <button class="btn-ghost" id="btn-tasks-panel" title="Tasks">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
-              <span>Tasks</span>
+            <button class="btn-ghost btn-download hidden" id="btn-download-report" title="Download report">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span>Report</span>
             </button>
             <button class="btn-ghost btn-danger" id="btn-delete-session" title="Delete">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
@@ -75,8 +81,12 @@
 
         <!-- Content Area -->
         <div class="content-area">
-          <!-- Chat Panel -->
+          <!-- Chat Panel (narrower) -->
           <div class="chat-panel">
+            <div class="chat-header">
+              <span class="chat-header-label">CONSOLE</span>
+              <span class="chat-header-meta" id="chat-header-meta"></span>
+            </div>
             <div class="messages" id="messages">
               <div class="messages-empty" id="messages-empty">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
@@ -101,19 +111,56 @@
             </div>
           </div>
 
-          <!-- Tasks Side Panel -->
-          <div class="tasks-panel hidden" id="tasks-panel">
-            <div class="tasks-header">
-              <h3>Attack Plan</h3>
-              <button class="btn-icon" id="btn-close-tasks">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              </button>
+          <!-- Atlas Panel: linkage map + detail -->
+          <div class="atlas-panel">
+            <div class="atlas-header">
+              <div class="atlas-header-left">
+                <span class="atlas-header-arrow">›</span>
+                <span class="atlas-header-title">PROPAGATION_LINKAGE_FLOW</span>
+              </div>
+              <div class="atlas-header-right" id="atlas-header-right">PLANNING…</div>
             </div>
-            <div class="tasks-body" id="tasks-body">
-              <div class="tasks-empty">No tasks yet</div>
+
+            <div class="atlas-body">
+              <div class="atlas-canvas" id="atlas-canvas">
+                <div class="atlas-empty" id="atlas-empty">
+                  <div class="atlas-empty-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                  </div>
+                  <h3>Awaiting Exploit Chain</h3>
+                  <p>Send a target query in the console — the agent will plan and execute tasks here.</p>
+                </div>
+              </div>
+
+              <aside class="atlas-detail hidden" id="atlas-detail">
+                <div class="atlas-detail-header">
+                  <span class="atlas-detail-label">ANALYSIS RESULTS</span>
+                  <button class="btn-icon" id="btn-detail-close" title="Close">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </div>
+                <div class="atlas-detail-body" id="atlas-detail-body"></div>
+              </aside>
             </div>
-            <div class="tasks-footer">
-              <button class="btn-ghost btn-sm" id="btn-graph">View Attack Graph</button>
+
+            <div class="atlas-footer">
+              <div class="atlas-footer-stat">
+                <span class="atlas-footer-key">TASKS_TOTAL:</span>
+                <span class="atlas-footer-val" id="stat-total">00</span>
+              </div>
+              <div class="atlas-footer-stat">
+                <span class="atlas-footer-key">COMPLETED:</span>
+                <span class="atlas-footer-val" id="stat-completed">00</span>
+              </div>
+              <div class="atlas-footer-stat">
+                <span class="atlas-footer-key">FAILED:</span>
+                <span class="atlas-footer-val" id="stat-failed">00</span>
+              </div>
+              <div class="atlas-footer-spacer"></div>
+              <div class="atlas-footer-stat">
+                <span class="atlas-footer-dot" id="stat-dot"></span>
+                <span class="atlas-footer-key" id="stat-state">SYSTEM IDLE</span>
+              </div>
             </div>
           </div>
         </div>
