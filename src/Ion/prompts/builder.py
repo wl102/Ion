@@ -219,14 +219,16 @@ _DOMAIN_KNOWLEDGE_CTF = """\
 - **Enumeration-First Doctrine (HARD CONSTRAINT)** — When you hold valid credentials and an active session, **you are FORBIDDEN from attempting advanced attacks until enumeration is provably complete**:
   1. **Enumerate all visible data first** — User profile, order/message history, file listings, config panels. Read every page's full source.
   2. **Fuzz ALL numeric ID endpoints exhaustively** — This is the #1 source of CTF flags. For every ID you see (user_id, order_id, receipt_id, file_id, message_id, etc.):
-     - Scan ±500 around discovered IDs with step=1 (not broad ranges like 200000-400000)
-     - Always test small integers: 1, 2, 3, 4, 5, 10, 50, 100, 500, 1000
+     - **Layer 1 (High-precision)**: Scan ±500 around discovered IDs with step=1.
+     - **Layer 2 (Extended coverage)**: If Layer 1 finds no anomalies, scan ±3000 with step=10 (covers 300K IDs with 600 requests).
+     - **Layer 3 (Broad sweep)**: If Layer 2 still finds nothing, scan ±10000 with step=100.
+     - Always test small integers: 1, 2, 3, 4, 5, 10, 20, 50, 100, 500, 1000, 5000, 9999
      - Group responses by content-length. ANY response with a different length from the baseline is a potential unauthorized data access — read it fully.
      - Do NOT dismiss "empty" or "template-only" responses. Read every byte of anomalous responses.
   3. **Read full content of every retrieved item** — Receipts, documents, API responses. Truncated output is your enemy; always request the full payload.
   4. **Enumeration completion checklist** (MUST pass ALL before advanced attacks):
      - [ ] All visible pages accessed and full HTML source inspected (including hidden fields, HTML comments, inline scripts)
-     - [ ] All numeric IDs discovered in any response are fuzzed with ±500 neighbors + small integers
+     - [ ] All numeric IDs fuzzed with Layer 1 (±500 step=1), then Layer 2 (±3000 step=10) if no anomalies, then Layer 3 (±10000 step=100) if still nothing. Plus small integers (1-100, 500, 1000, 5000, 9999).
      - [ ] All ID-based endpoints tested with anomalous IDs, and any response-length outliers fully read
      - [ ] All static assets (JS, CSS) fetched and grepped for hardcoded secrets, API endpoints, credentials
   5. **Only after ALL checklist items pass**, attempt advanced attacks (session forgery, SSTI, deserialization, RCE).
@@ -245,6 +247,21 @@ _DOMAIN_KNOWLEDGE_CTF = """\
   - GraphQL schema introspection results
   - **Always** fetch and grep `/js/`, `/static/`, `/assets/`, `main.*.js`, `app.*.js` for `password`, `token`, `secret`, `apiKey`, `test`, `admin`.
 - **Pivot on intelligence, not time** — The moment you gain actionable intelligence, replan your task graph to prioritize exploitation of that intelligence before doing anything else."""
+
+_EXPLOIT_CONFIRMATION_PROTOCOL = """\
+### Exploitation Confirmation Protocol (MANDATORY)
+Before declaring ANY vulnerability "confirmed", you MUST pass its confirmation test.
+A single positive signal (e.g., one reflected payload) is NEVER sufficient.
+
+| Vulnerability | Minimum Confirmation Tests (ALL must pass) | False-Positive Signature |
+|---------------|-------------------------------------------|-------------------------|
+| **SSTI** | 1. `{{7*7}}` → `49` <br> 2. `{{7*'7'}}` → `'7777777'` <br> 3. `{{config}}` or `{{self}}` renders object data <br> 4. `{{''.__class__.__mro__[1].__subclasses__()}}` executes | Only `{{7*7}}` works but `{{7*'7'}}` does NOT → frontend template (Vue/React), NOT exploitable. Stop immediately. |
+| **SQLi** | 1. `'` triggers error <br> 2. `'--` silences error <br> 3. `AND 1=1` vs `AND 1=2` produces different responses <br> 4. Time-based: `SLEEP(5)` adds ~5s to response | Single quote error but `'--` does NOT change response → likely parameterized query. Stop. |
+| **LFI/Path Traversal** | 1. `../../../etc/passwd` or `....//....//....//etc/passwd` returns file content <br> 2. `php://filter/convert.base64-encode/resource=index.php` returns base64 source | 400/403 error on first try → try URL-encoded variants (`%2e%2e%2f`) and wrappers. If 3 variants fail → stop. |
+| **JWT Forgery** | 1. Decode header: MUST contain `alg` field. <br> 2. If `alg=none` → remove signature, must authenticate. <br> 3. If `alg=HS256` → brute-force secret with top-1000 passwords, max 10s. <br> 4. If signature is NOT base64-decodable or NOT standard JWT structure → it's custom (itsdangerous, custom HMAC, etc.). | Non-standard JWT format (e.g., 20-byte hex signature, no `alg` in header) → do NOT attempt standard JWT attacks. Document as "custom token format" and pivot to IDOR/session analysis. |
+| **IDOR** | 1. Baseline: record your own object's status+length. <br> 2. Layer 1: Fuzz ±500 step=1. <br> 3. Layer 2 (if L1 empty): ±3000 step=10. <br> 4. Layer 3 (if L2 empty): ±10000 step=100. <br> 5. Small integers: 1-100, 500, 1000, 5000, 9999. <br> 6. Any DIFFERENT length → read FULL body. <br> 7. Other user's data → CONFIRMED. | All layers return identical responses → no IDOR. Move to next parameter. |
+
+**Rule**: If a vulnerability fails its confirmation test, you MUST NOT spend more than 1 additional turn on it. Create a task note documenting WHY it failed and pivot."""
 
 _DOMAIN_KNOWLEDGE_PENTEST = """\
 ### Penetration Testing Methodology
@@ -273,6 +290,15 @@ Frame all actions within the scientific method framework:
 - When encountering filtering/blocking, treat it as a "fingerprint" of underlying logic, not merely an obstacle.
 - **Failure Memory** — Maintain awareness of recently failed approaches. Do not retry the same method with superficially different parameters unless new evidence justifies it.
 - **Token Budget Awareness** — If an approach has consumed significant resources (>30% of available budget) with no tangible progress, escalate to the parent or pivot immediately.
+
+### CTF-Specific Abort Rules (Hard Limits)
+To prevent token waste on dead-end vectors:
+1. **JWT Non-Standard Format Abort**: If a token's signature is not valid base64 (contains non-alphanumeric chars other than `-_`), or if the header does not contain `alg`, or if signature length is not a multiple of 4 bytes → classify as "custom token". Do NOT attempt standard JWT attacks. Pivot immediately.
+2. **SSTI Abort**: If `{{7*7}}` reflects `49` but `{{7*'7'}}` does NOT reflect `7777777` → frontend template. Abort SSTI, remove from task graph.
+3. **SQLi Abort**: If 3 different syntax variants (`'`, `'"`, `')`) all return the same generic error page (identical content-length) → likely WAF or parameterized query. Abort after documenting.
+4. **IDOR Negative Abort**: If ALL layers (±500 step=1, ±3000 step=10, ±10000 step=100) + small-int scan on an endpoint return 100% identical responses → no IDOR on that parameter. Move to next parameter. Do NOT create additional IDOR tasks for the same parameter.
+5. **Brute-Force Abort**: Any brute-force (secret, password, ID) MUST have a success rate >15% after 5 attempts OR a hard time limit of 30s. If neither is met → abort and report "brute-force infeasible".
+6. **Single-Tool Retry Limit**: Do not retry the same tool with the same category of parameters more than 2 times. Switch tool or pivot.
 
 ### Subtask Completion Judgment
 - **Information Gathering** — Complete when all required information is collected.
@@ -344,32 +370,54 @@ _TASK_PATH_PLANNING_BASE = """\
 - Terminate planning when the user objective is achieved or all reachable paths are exhausted."""
 
 _TASK_PATH_PLANNING_CTF = """\
-### CTF Mode: Information-Driven Execution
-- In CTF mode, **abandon BFS as soon as you have actionable intelligence** — but with a critical exception:
-  - If the intelligence is **a valid session/credential**, do NOT immediately jump to advanced exploitation (session cracking, SSTI, RCE). Instead, **first perform systematic data enumeration** with that session.
-  - **HARD RULE**: You MUST complete the Enumeration Completion Checklist (defined in Domain Knowledge) before creating any session-forgery, SSTI, SQLi, or RCE tasks.
-  - Only if enumeration yields no flag, then pivot to advanced exploitation.
-- **Ready task ordering**:
-  1. Tasks that perform **data enumeration with a valid session** (highest priority when session exists)
-  2. Tasks that **fuzz ID-based endpoints** (second priority — this is the most common CTF flag location)
-  3. Tasks with higher `information_score` (derived from concrete intelligence)
-  4. Reconnaissance tasks (lowest priority once authenticated)
-- **IDOR Fuzzing Task Design** (MUST follow this pattern):
-  1. **Baseline**: Record the content-length of a known-valid response (e.g., your own order receipt).
-  2. **Neighbor scan**: Test ±500 around each discovered ID with step=1. Record status code + content-length for each.
-  3. **Small-integer scan**: Test IDs 1-100, 500, 1000, 9999. Record responses.
-  4. **Anomaly analysis**: Group all responses by (status, length). Any group with a DIFFERENT length from the baseline MUST have its full content read and analyzed.
-  5. **Report**: Return the full body of every anomalous response, not just "found X orders".
-- **Example flow (authenticated)**:
-  1. Login succeeds → `[H1] Enumerate all user data (profile, orders, messages)` → Read full source of every page
-  2. `[H1a] Fuzz order IDs ±500 with length-clustering analysis` → `[H1b] Fuzz user_id ±20` → `[H1c] Fuzz any other discovered IDs`
-  3. `[H1d] Read full content of every anomalous response` (different length/status)
-  4. **CHECKLIST PASS?** → If yes: `[H2] Audit session for forgery` → `[H3] Test SSTI on discovered endpoints`
-  5. **CHECKLIST FAIL?** → Go back to step 2 with broader ranges or different ID types.
-- **Example flow (unauthenticated)**:
-  1. Recon: discover web app → `[H1] LFI test` → `[H2] SQLi test`
-  2. LFI succeeds, reads `index.php` source → Immediately spawn: `[H2a] Audit source for SQLi`, `[H2b] Audit source for deserialization`
-- **Golden rule**: The flag is found in one of two places — (a) data you haven't looked at yet (usually IDOR), or (b) the 1% vulnerability that reveals hidden data. Enumerate first, exploit second."""
+### CTF Mode: Deterministic Decision Tree
+Your execution is NOT a suggestion list. It is a hard-coded priority engine. Follow phases in EXACT order.
+
+#### Phase 1: Reconnaissance (No session yet)
+Execute in this EXACT order:
+1. HTTP GET `/` → inspect HTML source, comments, inline scripts
+2. Fetch ALL static assets (`/js/`, `/static/`, `/assets/`, `main.*.js`) → grep for `password`, `token`, `secret`, `apiKey`, `test`, `admin`, `flag{`
+3. DirBrute → run ONCE with top-500 common paths. Stop after first batch.
+4. If login page found → test hardcoded credentials (`admin`/`admin`, `test`/`test`, `root`/`root`)
+
+#### Phase 2: Authenticated Enumeration (Session acquired)
+MUST complete ALL of the following before ANY advanced attacks:
+1. Visit every link visible in authenticated session. Record ALL numeric/UUID parameters.
+2. For EACH numeric parameter discovered:
+   - Baseline: request with your own ID, record (status, content-length, full body)
+   - Layer 1: test IDs from (baseline-500) to (baseline+500), step=1
+   - Layer 2 (if L1 empty): test (baseline-3000) to (baseline+3000), step=10
+   - Layer 3 (if L2 empty): test (baseline-10000) to (baseline+10000), step=100
+   - Small-int scan: test 1, 2, 3, 4, 5, 10, 20, 50, 100, 500, 1000, 5000, 9999
+   - Anomaly rule: ANY response with different content-length → read FULL body immediately
+3. For each endpoint with `archive`, `backup`, `export`, `download` in URL → test IDOR first (high probability)
+4. Checklist must be signed off before Phase 3.
+
+#### Phase 3: Vulnerability Testing (Only if Phase 2 yields no flag)
+Test in this EXACT priority order. Each vector MUST pass the Confirmation Protocol before proceeding:
+1. **LFI/Path Traversal** on ANY file parameter (highest yield in CTF source-code challenges)
+   - Test `?file=../../../etc/passwd`, `?page=php://filter/convert.base64-encode/resource=index.php`
+   - If source code obtained → IMMEDIATE Phase 4 (Source Audit)
+2. **SQL Injection** on login/search/any parameter
+   - Must pass full confirmation protocol before proceeding to UNION/time-based extraction
+3. **SSTI** on any reflected input
+   - Must pass full confirmation protocol. Frontend template reflection → immediate discard.
+4. **JWT/Session Forgery**
+   - First: determine if token is standard JWT. If not → skip to IDOR instead.
+   - Standard JWT: try `alg=none`, then HS256 secret brute-force (max 10s), then RS256→HS256.
+5. **File Upload** → if upload endpoint exists, test extension bypass + content-type bypass
+6. **SSRF** → if any URL parameter exists, test `file://`, `http://127.0.0.1/`, cloud metadata
+
+#### Phase 4: Source Code Audit (Triggered by LFI or file read)
+1. Read source of main application files (`index.php`, `app.py`, `routes.js`, etc.)
+2. Search for: `flag{`, `FLAG`, `os.environ`, `config[`, `secret_key`, dangerous functions (`eval`, `exec`, `pickle.loads`, `unserialize`, `render_template_string`)
+3. Trace data flow from user input to dangerous sink
+4. If source reveals new endpoint or parameter → go back to Phase 2 with new intelligence
+
+#### Phase 5: Post-Exploitation (RCE/LFI achieved)
+1. Read environment variables: `/proc/self/environ`, `env` command
+2. Search filesystem: `find / -name '*flag*' 2>/dev/null`, `grep -r 'flag{' /var/www/ 2>/dev/null`
+3. Check common locations: `/flag`, `/root/flag`, `/tmp/flag`, user home dirs"""
 
 _TOOL_GUIDELINES = """\
 ## Tool Usage Guidelines
@@ -582,6 +630,7 @@ class PromptBuilder:
                 parts.append(_DOMAIN_KNOWLEDGE_SECURITY)
                 if mode == "ctf":
                     parts.append(_DOMAIN_KNOWLEDGE_CTF)
+                    parts.append(_EXPLOIT_CONFIRMATION_PROTOCOL)
                 elif mode == "pentest":
                     parts.append(_DOMAIN_KNOWLEDGE_PENTEST)
             else:
