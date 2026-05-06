@@ -150,6 +150,10 @@ class MessageRecord(Base):
     tool_call_id: Mapped[str] = mapped_column(String(128), default="")
     tool_name: Mapped[str] = mapped_column(String(128), default="")
     duration_ms: Mapped[float] = mapped_column(Float, default=0.0)
+    # Tool call arguments (JSON) when role == "tool".
+    arguments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Extra metadata for observability events (JSON).
+    meta: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     session: Mapped["SessionRecord"] = relationship(back_populates="messages")
@@ -166,6 +170,8 @@ class MessageRecord(Base):
             "tool_call_id": self.tool_call_id,
             "tool_name": self.tool_name,
             "duration_ms": self.duration_ms,
+            "arguments": json.loads(self.arguments) if self.arguments else None,
+            "meta": json.loads(self.meta) if self.meta else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -184,3 +190,5 @@ class MessageRecord(Base):
         if self.role == "tool" and self.tool_call_id:
             msg["tool_call_id"] = self.tool_call_id
         return msg
+
+

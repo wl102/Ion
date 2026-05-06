@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import uuid
-from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException
@@ -99,7 +98,6 @@ def _generate_title(query: str, mode: str) -> str:
 @router.post("", response_model=SessionOut)
 def create_session(req: SessionCreate, db: Session = Depends(get_db_session)):
     sid = str(uuid.uuid4())[:8]
-    log_dir = str(Path.home() / ".ion" / "logs" / sid)
     title = req.title.strip() if req.title else ""
     if not title:
         title = _generate_title(req.query, req.mode)
@@ -108,7 +106,7 @@ def create_session(req: SessionCreate, db: Session = Depends(get_db_session)):
         title=title,
         mode=req.mode,
         status="idle",
-        log_dir=log_dir,
+        log_dir="",
     )
     db.add(record)
     db.commit()

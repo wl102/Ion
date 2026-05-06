@@ -418,7 +418,7 @@ def run_one_turn(
                 if callbacks:
                     cb = callbacks.get("on_tool_result")
                     if cb:
-                        cb(name, output, duration, agent_name=agent_name)
+                        cb(name, output, duration, agent_name=agent_name, arguments=args)
 
                 state.messages.append(
                     {

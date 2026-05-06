@@ -63,7 +63,29 @@ class WebAgentRunner:
         _base_url = base_url or os.getenv("OPENAI_BASE_URL")
         _api_key = api_key or os.getenv("OPENAI_API_KEY")
 
-        logger = ObservabilityLogger(log_dir=log_dir, run_id=session_id, agent_name="root")
+        def _persist_observability(category: str, entry: dict) -> None:
+            # Tool calls are already persisted by on_tool_result callback.
+            if category == "tool":
+                return
+
+            def _do_insert() -> None:
+                try:
+                    with next(self.db.get_session()) as sess:
+                        record = MessageRecord(
+                            session_id=self.session_id,
+                            role="event",
+                            meta=json.dumps(entry, ensure_ascii=False),
+                        )
+                        sess.add(record)
+                        sess.commit()
+                except Exception as exc:
+                    print(f"[obs-persist] failed to insert {category!r}: {exc}")
+
+            self._persist_executor.submit(_do_insert)
+
+        logger = ObservabilityLogger(
+            run_id=session_id, agent_name="root", persist_fn=_persist_observability
+        )
         task_manager = PersistentTaskManager(session_id, db)
         task_manager.load_from_db()
 
@@ -88,7 +110,7 @@ class WebAgentRunner:
     ) -> "WebAgentRunner":
         with cls._lock:
             if session_id not in cls._runners:
-                cls._runners[session_id] = cls(session_id, db, mode=mode, log_dir=log_dir)
+                cls._runners[session_id] = cls(session_id, db, mode=mode)
             return cls._runners[session_id]
 
     @classmethod
@@ -118,6 +140,8 @@ class WebAgentRunner:
         tool_name: str = "",
         duration_ms: float = 0.0,
         message_id: str = "",
+        arguments: dict | None = None,
+        meta: dict | None = None,
     ) -> None:
         """Schedule an INSERT into messages table on the persistence thread."""
 
@@ -134,6 +158,8 @@ class WebAgentRunner:
                         tool_call_id=tool_call_id,
                         tool_name=tool_name,
                         duration_ms=duration_ms,
+                        arguments=json.dumps(arguments, ensure_ascii=False) if arguments else None,
+                        meta=json.dumps(meta, ensure_ascii=False) if meta else None,
                     )
                     sess.add(record)
                     sess.commit()
@@ -213,6 +239,7 @@ class WebAgentRunner:
             output: str,
             duration_ms: float,
             agent_name: str = "root",
+            arguments: dict | None = None,
             **_,
         ):
             # Persist full tool output (no truncation in DB).
@@ -221,6 +248,7 @@ class WebAgentRunner:
                 content=output,
                 tool_name=name,
                 duration_ms=round(duration_ms, 2),
+                arguments=arguments,
             )
             # Truncate large outputs for SSE
             payload = output if len(output) < 5000 else output[:5000] + "\n...[truncated]"
@@ -279,22 +307,33 @@ class WebAgentRunner:
         }
 
     def _read_recent_tool_logs(self) -> list[dict[str, Any]]:
-        """Read the most recent lines from the current session's tool log file."""
-        log_dir = Path(self.logger.log_dir)
-        date_str = self.logger.date_str
-        tool_log = log_dir / f"tools_{date_str}.jsonl"
-        if not tool_log.exists():
-            return []
+        """Read the most recent tool log entries from the database."""
         try:
-            lines = tool_log.read_text(encoding="utf-8").splitlines()
-            entries = []
-            for line in lines[-5:]:
-                if line.strip():
-                    try:
-                        entries.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        continue
-            return entries
+            from Ion.db.models import MessageRecord
+
+            with next(self.db.get_session()) as sess:
+                records = (
+                    sess.query(MessageRecord)
+                    .filter_by(session_id=self.session_id, role="tool")
+                    .order_by(MessageRecord.id.desc())
+                    .limit(5)
+                    .all()
+                )
+                entries = []
+                for r in reversed(records):
+                    entry: dict[str, Any] = {
+                        "timestamp": r.created_at.isoformat() if r.created_at else None,
+                        "tool_name": r.tool_name,
+                        "output": r.content,
+                        "duration_ms": r.duration_ms,
+                    }
+                    if r.arguments:
+                        try:
+                            entry["arguments"] = json.loads(r.arguments)
+                        except json.JSONDecodeError:
+                            pass
+                    entries.append(entry)
+                return entries
         except Exception:
             return []
 

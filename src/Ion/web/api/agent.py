@@ -31,7 +31,6 @@ async def run_agent(sid: str, req: RunRequest, db: Session = Depends(get_db_sess
         sid,
         db=get_default_db(),
         mode=session.mode,
-        log_dir=session.log_dir,
     )
     await runner.start(req.query)
     return {"status": "started", "session_id": sid}

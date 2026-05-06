@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from Ion.db import Database, get_default_db
-from Ion.db.models import SessionRecord
+from Ion.db.models import MessageRecord, SessionRecord
 from Ion.web.schemas import LogsOut
 
 router = APIRouter()
@@ -23,24 +23,37 @@ def get_logs(sid: str, db: Session = Depends(get_db_session)):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    log_dir = Path(session.log_dir) if session.log_dir else Path.home() / ".ion" / "logs" / sid
-    if not log_dir.exists():
-        return LogsOut(files=[], content={})
-
-    files = [f.name for f in log_dir.iterdir() if f.is_file()]
+    records = (
+        db.query(MessageRecord)
+        .filter(MessageRecord.session_id == sid)
+        .filter(MessageRecord.role.in_(["tool", "event"]))
+        .all()
+    )
     content: dict[str, list] = {}
-    for fname in files:
-        fpath = log_dir / fname
-        if fname.endswith(".jsonl"):
-            lines = []
-            for line in fpath.read_text(encoding="utf-8").splitlines():
-                if line.strip():
-                    try:
-                        lines.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        lines.append({"raw": line})
-            content[fname] = lines
+    for r in records:
+        if r.role == "tool":
+            cat = "tool"
+            payload: dict[str, Any] = {
+                "timestamp": r.created_at.isoformat() if r.created_at else None,
+                "tool_name": r.tool_name,
+                "output": r.content,
+                "duration_ms": r.duration_ms,
+            }
+            if r.arguments:
+                try:
+                    payload["arguments"] = json.loads(r.arguments)
+                except json.JSONDecodeError:
+                    pass
         else:
-            content[fname] = fpath.read_text(encoding="utf-8")
+            try:
+                payload = json.loads(r.meta) if r.meta else {}
+            except json.JSONDecodeError:
+                payload = {"raw": r.meta}
+            cat = payload.get("event", "event")
 
+        if cat not in content:
+            content[cat] = []
+        content[cat].append(payload)
+
+    files = list(content.keys())
     return LogsOut(files=files, content=content)

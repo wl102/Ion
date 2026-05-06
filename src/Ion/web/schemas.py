@@ -109,6 +109,8 @@ class MessageOut(BaseModel):
     tool_call_id: str = ""
     tool_name: str = ""
     duration_ms: float = 0.0
+    arguments: Optional[dict[str, Any]] = None
+    meta: Optional[dict[str, Any]] = None
     created_at: Optional[datetime] = None
 
     class Config:

@@ -42,18 +42,19 @@ class Database:
     def _migrate(self):
         """Lightweight auto-migration: add columns that exist in models but not in DB."""
         try:
-            from .models import TaskRecord
+            from .models import Base
 
             inspector = inspect(self.engine)
-            existing_cols = {c["name"] for c in inspector.get_columns("tasks")}
-            expected_cols = {c.name for c in TaskRecord.__table__.columns}
-            missing = expected_cols - existing_cols
-
-            if missing:
-                with self.engine.begin() as conn:
+            with self.engine.begin() as conn:
+                for table in Base.metadata.sorted_tables:
+                    try:
+                        existing_cols = {c["name"] for c in inspector.get_columns(table.name)}
+                    except Exception:
+                        continue
+                    expected_cols = {c.name for c in table.columns}
+                    missing = expected_cols - existing_cols
                     for col_name in missing:
-                        col = TaskRecord.__table__.columns[col_name]
-                        # Build a dialect-aware ADD COLUMN statement
+                        col = table.columns[col_name]
                         col_type = col.type.compile(dialect=self.engine.dialect)
                         default = ""
                         if col.default is not None and hasattr(col.default, "arg"):
@@ -63,7 +64,7 @@ class Database:
                             else:
                                 default = f" DEFAULT {default_val}"
                         nullable = "" if not col.nullable else ""
-                        sql = f'ALTER TABLE tasks ADD COLUMN {col_name} {col_type}{default}{nullable}'
+                        sql = f'ALTER TABLE {table.name} ADD COLUMN {col_name} {col_type}{default}{nullable}'
                         conn.execute(text(sql))
         except Exception:
             # Best-effort: if migration fails, log and continue
