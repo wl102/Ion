@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import signal
 
 from .registry import registry, tool_error, tool_result
 from .tools import get_tool_exec_timeout
@@ -43,6 +44,7 @@ async def _bash_exec(command: str) -> str:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             cwd=os.getcwd(),
+            preexec_fn=os.setsid,
         )
 
         async def read_stream():
@@ -55,13 +57,19 @@ async def _bash_exec(command: str) -> str:
                     break
 
                 output_lines.append(chunk.decode("utf-8", errors="replace"))
+                # Yield back to the event loop so timer callbacks (wait_for)
+                # can fire even when the subprocess produces output continuously.
+                await asyncio.sleep(0)
 
         try:
             await asyncio.wait_for(
                 asyncio.gather(read_stream(), process.wait()), timeout=timeout
             )
         except asyncio.TimeoutError:
-            process.kill()
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             await process.wait()
 
             return tool_error(f"Execution timeout: exceeded {timeout}s")
