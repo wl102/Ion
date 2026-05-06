@@ -3,6 +3,7 @@ import logging
 import os
 
 from .registry import registry, tool_error, tool_result
+from .tools import get_tool_exec_timeout
 
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ async def _bash_exec(command: str) -> str:
     if any(p in lower_cmd for p in forbidden_patterns):
         return tool_error("Dangerous command blocked")
 
-    timeout = float(os.getenv("BASH_COMMAND_TIMEOUT", 120))
+    timeout = get_tool_exec_timeout()
 
     output_lines: list[str] = []
 

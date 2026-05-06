@@ -1,5 +1,29 @@
 import asyncio
+import os
 import threading
+
+
+# =============================================================================
+# Tool execution timeout (single source of truth)
+# =============================================================================
+
+_DEFAULT_TOOL_EXEC_TIMEOUT = 300.0
+
+
+def get_tool_exec_timeout() -> float:
+    """Unified execution timeout (seconds) for all tool handlers.
+
+    Read from the ``TOOL_EXEC_TIMEOUT`` environment variable on every call so
+    runtime overrides take effect without process restart. Falls back to
+    300 seconds when unset or unparseable.
+    """
+    raw = os.getenv("TOOL_EXEC_TIMEOUT")
+    if not raw:
+        return _DEFAULT_TOOL_EXEC_TIMEOUT
+    try:
+        return float(raw)
+    except ValueError:
+        return _DEFAULT_TOOL_EXEC_TIMEOUT
 
 
 # =============================================================================
@@ -81,7 +105,7 @@ def _run_async(coro):
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(asyncio.run, coro)
-            return future.result(timeout=300)
+            return future.result(timeout=get_tool_exec_timeout())
 
     # If we're on a worker thread (e.g., parallel tool execution in
     # delegate_task), use a per-thread persistent loop.  This avoids
