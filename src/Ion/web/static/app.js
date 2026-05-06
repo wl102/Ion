@@ -145,7 +145,36 @@
     });
     await loadSessions();
     await selectSession(session.id);
+    // Title is refined by a background task on the server when the caller
+    // didn't supply one. Poll a few times so the placeholder (truncated
+    // query) gets replaced once the LLM responds.
+    if (!title) {
+      scheduleTitleRefresh(session.id, session.title || '');
+    }
     return session;
+  }
+
+  function scheduleTitleRefresh(sid, placeholder) {
+    let attempts = 0;
+    const maxAttempts = 5;       // ~7.5 s total
+    const intervalMs = 1500;
+    const tick = async () => {
+      attempts++;
+      try {
+        const fresh = await api(`/api/sessions/${sid}`);
+        const idx = sessions.findIndex(s => s.id === sid);
+        if (idx >= 0) sessions[idx] = fresh;
+        if (currentSid === sid) {
+          currentSession = fresh;
+          topbarTitle.textContent = fresh.title || 'EXPLOIT CHAIN ATLAS';
+        }
+        renderSessionList();
+        // Stop polling once the title has changed away from the placeholder.
+        if (fresh.title && fresh.title !== placeholder) return;
+      } catch (_) { /* ignore transient errors */ }
+      if (attempts < maxAttempts) setTimeout(tick, intervalMs);
+    };
+    setTimeout(tick, intervalMs);
   }
 
   async function deleteSession(sid) {
