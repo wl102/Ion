@@ -1,59 +1,66 @@
 ---
 name: nmap
-description: Network mapper for discovering hosts and services on a computer network. Use when you need to scan ports, discover live hosts, identify running services, or map network topology.
-compatibility: Requires nmap to be installed on the system.
-metadata:
-  category: reconnaissance
-  tool: nmap
+description: Canonical Nmap CLI syntax, two-pass scanning workflow, and sandbox-safe bounded scan patterns.
 ---
 
-# Nmap Skill
+# Nmap CLI Playbook
 
-## When to use this skill
+Official docs:
+- https://nmap.org/book/man-briefoptions.html
+- https://nmap.org/book/man.html
+- https://nmap.org/book/man-performance.html
 
-Use this skill when the task involves:
-- Port scanning (TCP/UDP)
-- Host discovery
-- Service version detection
-- OS fingerprinting
-- Network topology mapping
+Canonical syntax:
+`nmap [Scan Type(s)] [Options] {target specification}`
 
-## Basic usage
+High-signal flags:
+- `-n` skip DNS resolution
+- `-Pn` skip host discovery when ICMP/ping is filtered
+- `-sS` SYN scan (root/privileged)
+- `-sT` TCP connect scan (no raw-socket privilege)
+- `-sV` detect service versions
+- `-sC` run default NSE scripts
+- `-p <ports>` explicit ports (`-p-` for all TCP ports)
+- `--top-ports <n>` quick common-port sweep
+- `--open` show only hosts with open ports
+- `-T<0-5>` timing template (`-T4` common)
+- `--max-retries <n>` cap retransmissions
+- `--host-timeout <time>` give up on very slow hosts
+- `--script-timeout <time>` bound NSE script runtime
+- `-oA <prefix>` output in normal/XML/grepable formats
 
-Scan a single target with service detection:
+Agent-safe baseline for automation:
+`nmap -n -Pn --open --top-ports 100 -T4 --max-retries 1 --host-timeout 90s -oA nmap_quick <host>`
 
-```bash
-nmap -sV <target>
-```
+Common patterns:
+- Fast first pass:
+  `nmap -n -Pn --top-ports 100 --open -T4 --max-retries 1 --host-timeout 90s <host>`
+- Very small important-port pass:
+  `nmap -n -Pn -p 22,80,443,8080,8443 --open -T4 --max-retries 1 --host-timeout 90s <host>`
+- Service/script enrichment on discovered ports:
+  `nmap -n -Pn -sV -sC -p <comma_ports> --script-timeout 30s --host-timeout 3m -oA nmap_services <host>`
+- No-root fallback:
+  `nmap -n -Pn -sT --top-ports 100 --open --host-timeout 90s <host>`
 
-Scan all ports on a target:
+Critical correctness rules:
+- Always set target scope explicitly.
+- Prefer two-pass scanning: discovery pass, then enrichment pass.
+- Always set a timeout boundary with `--host-timeout`; add `--script-timeout` whenever NSE scripts are involved.
+- Keep discovery scans tight: use explicit important ports or a small `--top-ports` profile unless broader coverage is explicitly required.
+- In sandboxed runs, avoid exhaustive sweeps (`-p-`, very high `--top-ports`, or wide host ranges) unless explicitly required.
+- Do not spam traffic; start with the smallest port set that can answer the question.
+- Prefer `naabu` for broad port discovery; use `nmap` for scoped verification/enrichment.
 
-```bash
-nmap -p- -sV <target>
-```
+Usage rules:
+- Add `-n` by default in automation to avoid DNS delays.
+- Use `-oA` for reusable artifacts.
+- Prefer `-p 22,80,443,8080,8443` or `--top-ports 100` before considering larger sweeps.
+- Do not use `-h`/`--help` for routine usage unless absolutely necessary.
 
-Stealth SYN scan (requires root):
+Failure recovery:
+- If host appears down unexpectedly, rerun with `-Pn`.
+- If scan stalls, tighten scope (`-p` or smaller `--top-ports`) and lower retries.
+- If scripts run too long, add `--script-timeout`.
 
-```bash
-sudo nmap -sS -sV <target>
-```
-
-## Common flags
-
-| Flag | Description |
-|------|-------------|
-| `-sV` | Detect service versions |
-| `-p <range>` | Scan specific ports (e.g., `-p 80,443` or `-p 1-65535`) |
-| `-sS` | TCP SYN scan (stealth, requires root) |
-| `-sT` | TCP connect scan |
-| `-sU` | UDP scan |
-| `-O` | OS detection |
-| `-A` | Aggressive scan (OS + version + script + traceroute) |
-| `-T<0-5>` | Timing template (0=paranoid, 5=insane) |
-| `-Pn` | Skip host discovery, treat all hosts as up |
-
-## Safety
-
-- Only scan targets you have explicit authorization to scan.
-- Be aware that aggressive scans may be logged by IDS/IPS.
-- Use `-T2` or `-T3` for less noisy scans.
+If uncertain, query web_search with:
+`site:nmap.org/book nmap <flag>`

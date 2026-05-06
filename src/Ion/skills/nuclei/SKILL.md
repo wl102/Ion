@@ -1,55 +1,67 @@
 ---
 name: nuclei
-description: Fast and customizable vulnerability scanner based on YAML templates. Use when you need to scan for known CVEs, misconfigurations, or security vulnerabilities on web targets.
-compatibility: Requires nuclei to be installed on the system.
-metadata:
-  category: vulnerability-scanning
-  tool: nuclei
+description: Exact Nuclei command structure, template selection, and bounded high-throughput execution controls.
 ---
 
-# Nuclei Skill
+# Nuclei CLI Playbook
 
-## When to use this skill
+Official docs:
+- https://docs.projectdiscovery.io/opensource/nuclei/running
+- https://docs.projectdiscovery.io/opensource/nuclei/mass-scanning-cli
+- https://github.com/projectdiscovery/nuclei
 
-Use this skill when the task involves:
-- Scanning for known CVEs
-- Detecting security misconfigurations
-- Finding exposed panels or sensitive files
-- Running template-based vulnerability scans
+Canonical syntax:
+`nuclei [flags]`
 
-## Basic usage
+High-signal flags:
+- `-u, -target <url>` single target
+- `-l, -list <file>` targets file
+- `-im, -input-mode <mode>` list/burp/jsonl/yaml/openapi/swagger
+- `-t, -templates <path|tag>` explicit template path(s)
+- `-tags <tag1,tag2>` run by tag
+- `-s, -severity <critical,high,...>` severity filter
+- `-as, -automatic-scan` tech-mapped automatic scan
+- `-ni, -no-interactsh` disable OAST/interactsh requests
+- `-rl, -rate-limit <n>` global request rate cap
+- `-c, -concurrency <n>` template concurrency
+- `-bs, -bulk-size <n>` hosts in parallel per template
+- `-timeout <seconds>` request timeout
+- `-retries <n>` retries
+- `-stats` periodic scan stats output
+- `-silent` findings-only output
+- `-j, -jsonl` JSONL output
+- `-o <file>` output file
 
-Scan a single URL:
+Agent-safe baseline for automation:
+`nuclei -l targets.txt -as -s critical,high -rl 50 -c 20 -bs 20 -timeout 10 -retries 1 -silent -j -o nuclei.jsonl`
 
-```bash
-nuclei -u <target>
-```
+Common patterns:
+- Focused severity scan:
+  `nuclei -u https://target.tld -s critical,high -silent -o nuclei_high.txt`
+- List-driven controlled scan:
+  `nuclei -l targets.txt -as -rl 50 -c 20 -bs 20 -timeout 10 -retries 1 -j -o nuclei.jsonl`
+- Tag-driven run:
+  `nuclei -l targets.txt -tags cve,misconfig -s critical,high,medium -silent`
+- Explicit templates:
+  `nuclei -l targets.txt -t http/cves/ -t dns/ -rl 30 -c 10 -bs 10 -j -o nuclei_templates.jsonl`
+- Deterministic non-OAST run:
+  `nuclei -l targets.txt -as -s critical,high -ni -stats -rl 30 -c 10 -bs 10 -timeout 10 -retries 1 -j -o nuclei_no_oast.jsonl`
 
-Scan with specific severity filters:
+Critical correctness rules:
+- Provide a template selection method (`-as`, `-t`, or `-tags`); avoid unscoped broad runs.
+- Keep `-rl`, `-c`, and `-bs` explicit for predictable resource use.
+- Use `-ni` when outbound interactsh/OAST traffic is not expected or not allowed.
+- Use structured output (`-j -o <file>`) for automation.
 
-```bash
-nuclei -u <target> -severity critical,high,medium
-```
+Usage rules:
+- Start with severity/tags/templates filters to keep runs explainable.
+- Keep retries conservative (`-retries 1`) unless transport instability is proven.
+- Do not use `-h`/`--help` for routine operation unless absolutely necessary.
 
-Scan a list of URLs:
+Failure recovery:
+- If performance degrades, lower `-c/-bs` before lowering `-rl`.
+- If findings are unexpectedly empty, verify template selection (`-as` vs explicit `-t/-tags`).
+- If scan duration grows, reduce target set and enforce stricter template/severity filters.
 
-```bash
-nuclei -l urls.txt
-```
-
-## Common flags
-
-| Flag | Description |
-|------|-------------|
-| `-u <url>` | Target URL |
-| `-l <file>` | List of target URLs |
-| `-severity <levels>` | Filter by severity (critical, high, medium, low, info) |
-| `-t <templates>` | Specify templates to use |
-| `-silent` | Silent mode, only show findings |
-| `-json` | Output in JSON format |
-| `-o <file>` | Output results to file |
-
-## Safety
-
-- Only scan targets you own or have explicit permission to test.
-- Some templates may be intrusive; review before running against production.
+If uncertain, query web_search with:
+`site:docs.projectdiscovery.io nuclei <flag> running`
