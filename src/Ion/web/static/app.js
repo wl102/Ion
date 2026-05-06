@@ -455,7 +455,7 @@
     if (opts.handoff) div.dataset.handoff = opts.handoff;
     let html = `
       <div class="msg-label">${esc(label)}</div>
-      <div class="msg-body">${esc(text)}</div>
+      <div class="msg-body">${renderMarkdown(text)}</div>
     `;
     if (!opts.historical) {
       html += `<div class="msg-time">${timeNow()}</div>`;
@@ -527,7 +527,13 @@
     if (!text) return;
     const raw = (node.dataset.raw || '') + text;
     node.dataset.raw = raw;
-    node.textContent = raw.replace(/^\s+|\s+$/g, '');
+    const trimmed = raw.replace(/^\s+|\s+$/g, '');
+    // Render markdown for assistant content nodes; keep plain text for thinking.
+    if (node.classList.contains('msg-content')) {
+      node.innerHTML = renderMarkdown(trimmed);
+    } else {
+      node.textContent = trimmed;
+    }
   }
 
   function appendToolStart(tools, opts = {}) {
@@ -1028,6 +1034,29 @@
   }
 
   // ---- Helpers ----
+  function renderMarkdown(text) {
+    if (!text) return '';
+    if (typeof marked === 'undefined') {
+      return esc(text).replace(/\n/g, '<br>');
+    }
+    const html = marked.parse(text, { headerIds: false, mangle: false });
+    return sanitizeHtml(html);
+  }
+
+  function sanitizeHtml(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    tmp.querySelectorAll('script, style, iframe, object, embed, form').forEach(el => el.remove());
+    tmp.querySelectorAll('*').forEach(el => {
+      for (const attr of [...el.attributes]) {
+        if (attr.name.startsWith('on') || /javascript:/i.test(attr.value)) {
+          el.removeAttribute(attr.name);
+        }
+      }
+    });
+    return tmp.innerHTML;
+  }
+
   function esc(str) {
     if (str === null || str === undefined) return '';
     const d = document.createElement('div');

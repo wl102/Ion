@@ -869,8 +869,113 @@ html, body {
 }
 
 .msg-content {
-  white-space: pre-wrap;
+  white-space: normal;
   word-break: break-word;
+}
+
+/* Markdown rendering styles */
+.msg-content h1, .msg-content h2, .msg-content h3,
+.msg-content h4, .msg-content h5, .msg-content h6 {
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 12px 0 8px;
+  color: var(--text);
+}
+
+.msg-content h1 { font-size: 16px; }
+.msg-content h2 { font-size: 15px; }
+.msg-content h3 { font-size: 14px; }
+.msg-content h4 { font-size: 13px; }
+.msg-content h5 { font-size: 12px; }
+.msg-content h6 { font-size: 11px; color: var(--text-muted); }
+
+.msg-content p {
+  margin: 0 0 8px;
+}
+
+.msg-content p:last-child {
+  margin-bottom: 0;
+}
+
+.msg-content ul, .msg-content ol {
+  margin: 4px 0 8px 16px;
+  padding-left: 8px;
+}
+
+.msg-content li {
+  margin: 2px 0;
+}
+
+.msg-content blockquote {
+  margin: 4px 0 8px;
+  padding: 4px 12px;
+  border-left: 2px solid var(--accent);
+  background: var(--accent-dim);
+  border-radius: 0 4px 4px 0;
+  color: var(--text-muted);
+}
+
+.msg-content blockquote p {
+  margin: 2px 0;
+}
+
+.msg-content a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.msg-content a:hover {
+  text-decoration: underline;
+}
+
+.msg-content img {
+  max-width: 100%;
+  border-radius: 4px;
+  margin: 4px 0;
+}
+
+.msg-content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 12px 0;
+}
+
+.msg-content pre.msg-code-block {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  overflow-x: auto;
+}
+
+.msg-content pre.msg-code-block code {
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.msg-content code {
+  background: rgba(255,255,255,0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.msg-content strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.msg-content em {
+  font-style: italic;
+}
+
+.msg-content del {
+  text-decoration: line-through;
+  color: var(--text-dim);
 }
 
 /* ---- Hook Bar ---- */
