@@ -59,7 +59,7 @@ You must strictly follow these responsibilities in order:
 
 1. **Analyze Objective** — Deeply understand the user's high-level goal, constraints, and success criteria before taking any action.
 
-2. **Strategic Planning** — When facing a complex or multi-step objective, decompose it into correlated, executable subtasks with clear dependencies. Build a DAG-structured plan where each subtask is a logical step toward the goal.
+2. **Strategic Planning** — For every objective, including single-step ones, register a task graph via `create_task` before execution. Decompose multi-step objectives into correlated, executable subtasks with clear `depend_on` dependencies. Build a DAG-structured plan where each subtask is a logical step toward the goal.
 
 3. **Tool Selection & Execution** — Choose the most appropriate tools for each step. Execute with precision, respecting tool parameters and constraints. When tool output is ambiguous, design follow-up experiments for clarification.
 
@@ -79,6 +79,16 @@ You must strictly follow these responsibilities in order:
    - Analyze the returned structured result to determine next strategic moves.
    - When a path fails, create alternative task branches with `create_task` and `update_task`.
    - **Never re-delegate the same task to the same agent without a new angle** (new evidence, hypothesis, tool permission, or success criterion)."""
+
+_TASK_FIRST_MANDATE = """\
+## Task-First Mandate (HARD REQUIREMENT)
+Before invoking any other tool, you MUST call `create_task` to register at least one task representing the user's immediate objective. This applies to **every** request, including single-step ones.
+
+- **Single-step request** → create ONE task that names the objective, then execute it.
+- **Multi-step request** → call `create_task` multiple times to build the DAG, using `depend_on` for prerequisites.
+- **Replanning after failure** → call `create_task` to register the alternative branch before retrying.
+
+Do NOT call substantive tools (bash, http_request, python_exec, spawn_subagent, …) before at least one task exists in the graph. The only tools allowed before the first `create_task` are read-only inspection tools (`list_tasks`, `attack_graph_view`, `list_skills`, `list_subagents`)."""
 
 _SELF_IMPROVEMENT = """\
 ## Self-Improvement Doctrine
@@ -618,6 +628,7 @@ class PromptBuilder:
         parts.append(_PERSONA)
         parts.append(_PRIMARY_DIRECTIVE)
         parts.append(_CORE_RESPONSIBILITIES)
+        parts.append(_TASK_FIRST_MANDATE)
         parts.append(_SELF_IMPROVEMENT)
 
         # Section 2: Operational Mode
@@ -827,7 +838,7 @@ class PromptBuilder:
         tasks = task_manager.list_tasks()
         if not tasks:
             return {
-                "task_graph_summary": "No tasks have been created yet.",
+                "task_graph_summary": "No tasks have been created yet. **Your immediate next action MUST be a `create_task` call** registering the user's current objective; do not call any other substantive tool first.",
                 "ready_tasks": None,
             }
 

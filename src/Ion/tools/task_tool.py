@@ -378,7 +378,7 @@ def register_task_tools(task_manager):
                 information_score, intelligence_source
             )
         ),
-        description="Create a new task in the attack graph.",
+        description="Register a task in the execution graph.",
         emoji="📋",
     )
 
@@ -398,7 +398,7 @@ def register_task_tools(task_manager):
         toolset="task",
         schema=DELETE_TASK_SCHEMA,
         handler=lambda task_id, **kw: _delete_task(task_manager, task_id),
-        description="Delete a task from the attack graph.",
+        description="Delete a task from the execution graph.",
         emoji="🗑️",
     )
 
@@ -407,7 +407,7 @@ def register_task_tools(task_manager):
         toolset="task",
         schema=LIST_TASKS_SCHEMA,
         handler=lambda **kw: _list_tasks(task_manager),
-        description="List all tasks in the attack graph.",
+        description="List all tasks in the execution graph.",
         emoji="📜",
     )
 
@@ -416,7 +416,7 @@ def register_task_tools(task_manager):
         toolset="task",
         schema=ATTACK_GRAPH_VIEW_SCHEMA,
         handler=lambda **kw: _attack_graph_view(task_manager),
-        description="View the attack graph as a tree structure.",
+        description="View the execution graph as a tree structure.",
         emoji="🌳",
     )
 
@@ -450,10 +450,9 @@ CREATE_TASK_SCHEMA = {
     "function": {
         "name": "create_task",
         "description": (
-            "Create a new task in the attack graph. "
-            "Use information_score to prioritize high-value exploitation paths (CTF mode). "
-            "Set information_score=8-10 for tasks based on source code/credentials discovered by a parent task. "
-            "Set information_score=0-3 for pure reconnaissance tasks."
+            "Register a task in the execution graph. **Call this before any substantive work** — even single-step objectives must have at least one task node. "
+            "Use `depend_on` to express prerequisite chains. Optional `information_score` (0-10) prioritizes higher-value tasks when multiple are ready "
+            "(set higher when the task was spawned from rich intelligence such as discovered credentials, source code, or schema)."
         ),
         "parameters": {
             "type": "object",
@@ -504,7 +503,7 @@ DELETE_TASK_SCHEMA = {
     "type": "function",
     "function": {
         "name": "delete_task",
-        "description": "Delete a task from the attack graph.",
+        "description": "Delete a task from the execution graph.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -520,7 +519,7 @@ LIST_TASKS_SCHEMA = {
     "type": "function",
     "function": {
         "name": "list_tasks",
-        "description": "List all tasks in the attack graph.",
+        "description": "List all tasks in the execution graph.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }
@@ -529,7 +528,7 @@ ATTACK_GRAPH_VIEW_SCHEMA = {
     "type": "function",
     "function": {
         "name": "attack_graph_view",
-        "description": "View the attack graph as a tree structure.",
+        "description": "View the execution graph as a tree structure.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }
