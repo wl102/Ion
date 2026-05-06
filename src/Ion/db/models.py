@@ -10,7 +10,6 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -27,9 +26,9 @@ class SessionRecord(Base):
     mode: Mapped[str] = mapped_column(String(32), default="general")
     status: Mapped[str] = mapped_column(String(32), default="idle")
     log_dir: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=func.now(), onupdate=func.now()
+        DateTime, default=datetime.now, onupdate=datetime.now
     )
 
     tasks: Mapped[List["TaskRecord"]] = relationship(
@@ -73,9 +72,9 @@ class TaskRecord(Base):
     intelligence_source: Mapped[str] = mapped_column(Text, default="")
     execution_notes: Mapped[str] = mapped_column(Text, default="[]")
     key_findings: Mapped[str] = mapped_column(Text, default="[]")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=func.now(), onupdate=func.now()
+        DateTime, default=datetime.now, onupdate=datetime.now
     )
 
     session: Mapped["SessionRecord"] = relationship(back_populates="tasks")
@@ -94,7 +93,9 @@ class TaskRecord(Base):
             "max_attempts": self.max_attempts,
             "information_score": self.information_score,
             "intelligence_source": self.intelligence_source,
-            "execution_notes": json.loads(self.execution_notes) if self.execution_notes else [],
+            "execution_notes": json.loads(self.execution_notes)
+            if self.execution_notes
+            else [],
             "key_findings": json.loads(self.key_findings) if self.key_findings else [],
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -110,7 +111,7 @@ class HookRecord(Base):
     )
     content: Mapped[str] = mapped_column(Text)
     consumed: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     session: Mapped["SessionRecord"] = relationship(back_populates="hooks")
 
@@ -149,7 +150,7 @@ class MessageRecord(Base):
     tool_call_id: Mapped[str] = mapped_column(String(128), default="")
     tool_name: Mapped[str] = mapped_column(String(128), default="")
     duration_ms: Mapped[float] = mapped_column(Float, default=0.0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     session: Mapped["SessionRecord"] = relationship(back_populates="messages")
 
