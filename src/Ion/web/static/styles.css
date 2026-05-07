@@ -856,6 +856,7 @@ html, body {
   font-style: italic;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
   max-height: 320px;
   overflow-y: auto;
 }
@@ -871,6 +872,7 @@ html, body {
 .msg-content {
   white-space: normal;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 /* Markdown rendering styles */
@@ -940,20 +942,26 @@ html, body {
   margin: 12px 0;
 }
 
-.msg-content pre.msg-code-block {
+.msg-content pre {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 10px 12px;
   margin: 8px 0;
   overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
-.msg-content pre.msg-code-block code {
+.msg-content pre code {
   background: transparent;
   padding: 0;
   font-size: 12px;
   line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .msg-content code {
@@ -962,6 +970,8 @@ html, body {
   border-radius: 3px;
   font-family: var(--font-mono);
   font-size: 12px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .msg-content strong {

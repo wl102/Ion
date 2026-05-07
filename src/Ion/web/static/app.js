@@ -482,10 +482,9 @@
     const label = isSubagent ? opts.agentName : (labelMap[role] || role);
     if (opts.agentName) div.dataset.agent = opts.agentName;
     if (opts.handoff) div.dataset.handoff = opts.handoff;
-    let html = `
-      <div class="msg-label">${esc(label)}</div>
-      <div class="msg-body">${renderMarkdown(text)}</div>
-    `;
+    const safeText = role === 'user' ? (text || '').trim() : text;
+    const bodyContent = role === 'user' ? esc(safeText) : renderMarkdown(safeText);
+    let html = `<div class="msg-label">${esc(label)}</div><div class="msg-body">${bodyContent}</div>`;
     if (!opts.historical) {
       html += `<div class="msg-time">${timeNow()}</div>`;
     }
@@ -635,9 +634,10 @@
 
   // ---- Run / Interrupt / Resume ----
   async function runAgent(query) {
-    if (!currentSid || !query.trim()) return;
+    const trimmed = (query || '').trim();
+    if (!currentSid || !trimmed) return;
 
-    appendMessage('user', query);
+    appendMessage('user', trimmed);
     scrollToBottom();
     queryInput.value = '';
     autoResize(queryInput);
@@ -645,7 +645,7 @@
     try {
       await api(`/api/sessions/${currentSid}/run`, {
         method: 'POST',
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query: trimmed }),
       });
       connectSSE(currentSid);
       updateStatus('running');
@@ -671,9 +671,10 @@
   }
 
   async function resumeAgent(query) {
-    if (!currentSid || !query.trim()) return;
+    const trimmed = (query || '').trim();
+    if (!currentSid || !trimmed) return;
 
-    appendMessage('user', query);
+    appendMessage('user', trimmed);
     scrollToBottom();
     queryInput.value = '';
     autoResize(queryInput);
@@ -681,7 +682,7 @@
     try {
       await api(`/api/sessions/${currentSid}/resume`, {
         method: 'POST',
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query: trimmed }),
       });
       connectSSE(currentSid);
       updateStatus('running');
