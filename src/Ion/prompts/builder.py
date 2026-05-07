@@ -67,9 +67,9 @@ You must strictly follow these responsibilities in order:
 
 5. **Hypothesis Management** — Form testable hypotheses based on observations. Update hypothesis confidence based on experimental results. Falsify hypotheses when evidence contradicts them.
 
-6. **State Synchronization** — Keep the task graph accurate and up-to-date. Report subtask completion when objectives are achieved. Flag blockers and failures with root cause analysis.
+6. **State Synchronization** — Keep the task graph accurate and up-to-date. Per the Task-State Mandate, call `update_task` to mark a task `running` when you start it and `completed`/`failed` the moment its outcome is decided — narrative acknowledgment in your reply is NOT a substitute for the graph update.
 
-7. **Convergence & Termination** — When the primary goal is achieved, terminate cleanly. When a path is exhausted, pivot strategically rather than persisting without information gain.
+7. **Convergence & Termination** — When the primary goal is achieved, terminate cleanly. Before termination, audit the graph: every task MUST be in a terminal state (`completed`, `failed`, or `killed`). If any task is still `running` or `pending`, call `update_task` to sync it. When a path is exhausted, pivot strategically rather than persisting without information gain.
 
 8. **Layered Execution Orchestration** — Decide execution mode per task:
    - **Delegate** when the task is highly specialized, sliceable, and has a clear deliverable.
@@ -89,6 +89,19 @@ Before invoking any other tool, you MUST call `create_task` to register at least
 - **Replanning after failure** → call `create_task` to register the alternative branch before retrying.
 
 Do NOT call substantive tools (bash, http_request, python_exec, spawn_subagent, …) before at least one task exists in the graph. The only tools allowed before the first `create_task` are read-only inspection tools (`list_tasks`, `attack_graph_view`, `list_skills`, `list_subagents`)."""
+
+_TASK_STATE_MANDATE = """\
+## Task-State Mandate (HARD REQUIREMENT)
+The task graph is the single source of truth for execution state. Saying "task X is done" in your prose does NOT change graph state — only an `update_task` call does. Status drift (graph still says `pending`/`running` after the work is finished) breaks dependency resolution, ready-queue ordering, and downstream replanning.
+
+You MUST call `update_task` at each of these decision points:
+
+- **Claiming a task** → before issuing the first substantive tool call for a task, set `update_task(task_id, status="running")`. This signals progress and prevents you from interleaving unrelated work.
+- **Completing a task** → the moment its success criteria are met, call `update_task(task_id, status="completed", result="<one-line evidence summary>")` BEFORE doing anything else. Do not start the next task, do not write a long narrative — record completion first.
+- **Failing / aborting a task** → call `update_task(task_id, status="failed", result="<root cause>")` so dependent tasks unblock for replanning instead of waiting on a dead branch.
+- **Before ending the turn / terminating** → every task in the graph MUST be in a terminal state (`completed`, `failed`, `killed`). Leaving tasks `pending`/`running` while telling the user the objective is done is a protocol violation.
+
+**Prose acknowledgment ≠ graph update.** If you tell the user "step 1 finished, moving to step 2" while the graph still shows step 1 as `pending` or `running`, you have failed the mandate. After every batch of substantive tool calls, audit the graph: any task whose work is actually complete must be marked `completed` in this same turn."""
 
 _SELF_IMPROVEMENT = """\
 ## Self-Improvement Doctrine
@@ -311,10 +324,12 @@ To prevent token waste on dead-end vectors:
 6. **Single-Tool Retry Limit**: Do not retry the same tool with the same category of parameters more than 2 times. Switch tool or pivot.
 
 ### Subtask Completion Judgment
+Use these criteria to decide WHEN a task is done:
 - **Information Gathering** — Complete when all required information is collected.
 - **Verification** — Complete when decisive testing confirms or refutes the hypothesis.
 - **Execution** — Complete when the expected effect is achieved.
-- Once a subtask is complete, set its status to `completed` and do not perform additional unrelated actions.
+
+Once a subtask meets its completion criteria, **immediately call `update_task(task_id, status="completed", result=...)` before issuing any other tool call**. Per the Task-State Mandate, prose ("done", "moving on", "next step") is not a substitute for the graph update — the very next tool call after a task's success criteria are met must be `update_task`.
 
 ### Layered Execution Principle
 - **Planning Phase** — Decompose the objective into a DAG using `create_task`. Set `depend_on` to encode causal prerequisites.
@@ -322,6 +337,10 @@ To prevent token waste on dead-end vectors:
   - Spawn a sub-agent via `spawn_subagent` only when the task is specialized, self-contained, and has clear success criteria.
   - Execute directly when the task requires tight context coupling, rapid iterative probing, or synthesis across multiple branches.
 - **Evaluation Phase** — Read the sub-agent's **structured result** (JSON). Check `status`, `confidence`, and `recommended_next_action`. Distinguish between "path verified" (success) and "path blocked" (failure).
+- **Status Update Phase** — **Immediately after Evaluation**, call `update_task` to reflect the actual outcome:
+  - Sub-agent returns `completed` or `partial` → `update_task(task_id, status="completed", result="<evidence summary>")`.
+  - Sub-agent returns `blocked`, `failed`, or `budget_exhausted` → `update_task(task_id, status="failed", result="<root cause>")`.
+  - Do NOT proceed to Replanning or Iteration until the current task's graph state matches the evaluated result.
 - **Replanning Phase** — When a task fails, create alternative branches with `create_task` and `update_task`. Preserve the original dependency structure via `depend_on`.
 - **Iteration** — Delegate the next layer of ready tasks, but **never re-delegate the same goal to the same agent without a new information delta**.
 
@@ -465,9 +484,13 @@ _TOOL_GUIDELINES = """\
 ### Task Graph Execution Workflow
 1. **Plan** — Build the DAG with `create_task`. Use `depend_on` to enforce causal order.
 2. **Execute** — For each ready task, choose direct execution or delegation based on fit. If delegating, use `spawn_subagent` with explicit `success_criteria`.
-3. **Evaluate** — Parse the sub-agent's **structured JSON result**. Check `status`, `confidence`, `key_findings`, and `recommended_next_action`.
-4. **Replan** (if needed) — On `blocked`, `failed`, or `budget_exhausted`, create alternative branches with `create_task`. On `wrong_agent`, pivot to a different agent or take over directly.
-5. **Iterate** — Go back to step 2 until the graph is fully resolved.
+3. **Evaluate** — Parse the sub-agent's **structured JSON result** (or your own direct-execution outcome). Check `status`, `confidence`, `key_findings`, and `recommended_next_action`.
+4. **Update Graph** — **MANDATORY** after every task execution (direct or delegated). Call `update_task` with the correct terminal status:
+   - Success (`completed`/`partial`) → `update_task(task_id, status="completed", result="<summary>")`
+   - Failure (`blocked`/`failed`/`budget_exhausted`) → `update_task(task_id, status="failed", result="<root cause>")`
+   - Never proceed to the next task while the current one remains `running` in the graph.
+5. **Replan** (if needed) — On `blocked`, `failed`, or `budget_exhausted`, create alternative branches with `create_task`. On `wrong_agent`, pivot to a different agent or take over directly.
+6. **Iterate** — Go back to step 2 until the graph is fully resolved.
 
 ### Replanning Guidelines
 - Use when a task fails and you need to pivot to a different approach.
@@ -629,6 +652,7 @@ class PromptBuilder:
         parts.append(_PRIMARY_DIRECTIVE)
         parts.append(_CORE_RESPONSIBILITIES)
         parts.append(_TASK_FIRST_MANDATE)
+        parts.append(_TASK_STATE_MANDATE)
         parts.append(_SELF_IMPROVEMENT)
 
         # Section 2: Operational Mode
@@ -843,11 +867,22 @@ class PromptBuilder:
             }
 
         lines = []
+        running_ids: list[str] = []
         for t in tasks:
             deps = ", ".join(t.depend_on) if t.depend_on else "none"
             score_tag = f" [score:{t.information_score}]" if t.information_score > 0 else ""
             lines.append(f"- {t.id}: [{t.status.value}] {t.name}{score_tag} (deps: {deps})")
+            if t.status.value == "running":
+                running_ids.append(t.id)
         graph_summary = "\n".join(lines)
+
+        if running_ids:
+            graph_summary += (
+                f"\n\n⚠ Tasks currently `running`: {', '.join(running_ids)}. "
+                "Per the Task-State Mandate, if their work is finished you MUST call "
+                "`update_task(task_id, status=\"completed\", result=...)` BEFORE starting "
+                "any other task or ending the turn. Stale `running` tasks block replanning."
+            )
 
         ready = task_manager.get_ready_tasks()
         ready_text = None
@@ -859,7 +894,13 @@ class PromptBuilder:
                 ready_lines.append(
                     f"- {t.id}: {t.name}{score_tag} — {t.description}{intel}"
                 )
-            ready_text = "\n".join(ready_lines)
+            ready_text = (
+                "\n".join(ready_lines)
+                + "\n\n"
+                + "**State Sync Rule**: Before executing ANY ready task, call `update_task(task_id, status=\"running\")` first. "
+                "When the task finishes (success or failure), the VERY NEXT tool call must be "
+                "`update_task(task_id, status=\"completed\", result=...)`. Never start another task while the current one is still `running`."
+            )
 
         failed = task_manager.get_failed_tasks()
         failed_text = None

@@ -483,7 +483,7 @@ UPDATE_TASK_SCHEMA = {
     "type": "function",
     "function": {
         "name": "update_task",
-        "description": "Update a task's status and optionally its result.",
+        "description": "Update a task's status and optionally its result. CRITICAL: You MUST call this after every task execution to synchronize graph state. Prose completion is NOT sufficient — the task graph is the single source of truth. Call `update_task(task_id, status=\"running\")` before starting work, and `update_task(task_id, status=\"completed\", result=...) ` immediately upon success/failure.",
         "parameters": {
             "type": "object",
             "properties": {
