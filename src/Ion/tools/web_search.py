@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 def _web_search(query: str) -> str:
     """Search the web using DuckDuckGo."""
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS
 
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=5))
