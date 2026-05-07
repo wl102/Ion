@@ -167,14 +167,38 @@ class IonAgent:
         """Inject a user message into the running agent loop."""
         self.hook_queue.put(content)
 
-    def run(self, query: str, callbacks: Optional[dict[str, Any]] = None, pause_check: Optional[callable] = None) -> str:
-        # Initial system prompt with runtime context (Layer 3 injected at start)
-        system_prompt = self._build_system_prompt(user_goal=query)
+    def run(
+        self,
+        query: str = "",
+        callbacks: Optional[dict[str, Any]] = None,
+        pause_check: Optional[callable] = None,
+        initial_messages: Optional[list[dict]] = None,
+    ) -> str:
+        """Run the agent loop.
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": query},
-        ]
+        Args:
+            query: The initial user query. Ignored when `initial_messages` is provided.
+            callbacks: Optional streaming/event callbacks.
+            pause_check: Optional callable that blocks between turns (for interrupt/resume).
+            initial_messages: Optional pre-built message list. When provided, the loop
+                resumes from this context instead of starting fresh with [system, user].
+        """
+        if initial_messages is not None:
+            messages = list(initial_messages)
+            # Derive user_goal from the first user message for system-prompt refresh
+            user_goal = query
+            for msg in messages:
+                if msg.get("role") == "user":
+                    user_goal = msg.get("content", "") or query
+                    break
+        else:
+            user_goal = query
+            system_prompt = self._build_system_prompt(user_goal=user_goal)
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": query},
+            ]
+
         state = LoopState(
             messages=messages,
             max_turns=self.max_turns,
@@ -189,7 +213,7 @@ class IonAgent:
             if not self.use_layered_prompts:
                 return
             new_prompt = self._build_system_prompt(
-                user_goal=query, messages=st.messages
+                user_goal=user_goal, messages=st.messages
             )
             if st.messages and st.messages[0].get("role") == "system":
                 st.messages[0]["content"] = new_prompt

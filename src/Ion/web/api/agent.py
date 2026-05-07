@@ -21,18 +21,22 @@ async def run_agent(sid: str, req: RunRequest, db: Session = Depends(get_db_sess
     session = db.query(SessionRecord).filter_by(id=sid).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.status == "running":
-        raise HTTPException(status_code=409, detail="Session is already running")
-
-    session.status = "running"
-    db.commit()
 
     runner = WebAgentRunner.get_or_create(
         sid,
         db=get_default_db(),
         mode=session.mode,
     )
-    await runner.start(req.query)
+
+    # Use the runner's start_lock so that status check + start() are atomic
+    # and multiple concurrent /run requests cannot race.
+    async with runner._start_lock:
+        if runner._run_future is not None and not runner._run_future.done():
+            raise HTTPException(status_code=409, detail="Session is already running")
+        session.status = "running"
+        db.commit()
+        await runner.start(req.query)
+
     return {"status": "started", "session_id": sid}
 
 
@@ -71,8 +75,21 @@ async def resume_agent(sid: str, req: RunRequest, db: Session = Depends(get_db_s
         raise HTTPException(status_code=404, detail="Session not found")
 
     runner = WebAgentRunner.get(sid)
-    if not runner:
-        raise HTTPException(status_code=409, detail="Agent not running")
+    if runner is None:
+        # Server restart scenario: runner was lost but session may be paused.
+        # Reconstruct the runner and resume from the database snapshot.
+        if session.status != "paused":
+            raise HTTPException(status_code=409, detail="Agent not running")
+        runner = WebAgentRunner.get_or_create(
+            sid,
+            db=get_default_db(),
+            mode=session.mode,
+        )
+        await runner.restore_and_resume(req.query)
+        session.status = "running"
+        db.commit()
+        return {"status": "resumed_from_snapshot", "session_id": sid}
+
     await runner.submit_hook(req.query)
     runner.resume()
     session.status = "running"

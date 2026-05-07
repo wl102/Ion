@@ -43,12 +43,14 @@ class WebAgentRunner:
     ):
         self.session_id = session_id
         self.db = db
-        self.sse_queue: asyncio.Queue[dict[str, Any]] | None = None
+        self._sse_queues: set[asyncio.Queue[dict[str, Any]]] = set()
+        self._sse_queues_lock = threading.Lock()
         self._main_loop: asyncio.AbstractEventLoop | None = None
         self._queue_ready = asyncio.Event()
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"agent-{session_id}")
         self._run_future: Any = None
         self._done = False
+        self._start_lock = asyncio.Lock()
         self._pause_event = threading.Event()
         self._pause_event.set()  # default: not paused
 
@@ -127,6 +129,27 @@ class WebAgentRunner:
                 runner._persist_executor.shutdown(wait=False)
 
     # ------------------------------------------------------------------ #
+    #  Broadcast helpers                                                 #
+    # ------------------------------------------------------------------ #
+
+    def _broadcast_event(self, event: dict[str, Any]) -> None:
+        """Send an event to all connected SSE consumers.
+
+        Called from the agent background thread; uses run_coroutine_threadsafe
+        so that Queue.put runs on the event-loop thread.
+        """
+        loop = self._main_loop
+        if loop is None:
+            return
+        with self._sse_queues_lock:
+            queues = list(self._sse_queues)
+        for q in queues:
+            try:
+                asyncio.run_coroutine_threadsafe(q.put(event), loop)
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------ #
     #  Persistence helpers                                               #
     # ------------------------------------------------------------------ #
 
@@ -178,8 +201,7 @@ class WebAgentRunner:
             raise RuntimeError("Main event loop not set; call start() first.")
 
         def put_event(event: dict[str, Any]):
-            if self.sse_queue is not None:
-                asyncio.run_coroutine_threadsafe(self.sse_queue.put(event), loop)
+            self._broadcast_event(event)
 
         def on_assistant_start(message_id: str, agent_name: str = "root", **_):
             self._assistant_buffers[message_id or ""] = _AssistantBuffer()
@@ -345,71 +367,162 @@ class WebAgentRunner:
         """Resume a paused agent loop."""
         self._pause_event.set()
 
+    def _rebuild_messages(self, max_tools: int = 15) -> list[dict]:
+        """Rebuild message history from the database for session recovery.
+
+        Keeps all system / user / assistant messages, but strips early tool
+        results and orphaned tool_calls to avoid bloating the context window.
+        """
+        try:
+            from Ion.db.models import MessageRecord
+
+            with next(self.db.get_session()) as sess:
+                records = (
+                    sess.query(MessageRecord)
+                    .filter_by(session_id=self.session_id)
+                    .filter(MessageRecord.role.in_(["system", "user", "assistant", "tool"]))
+                    .order_by(MessageRecord.id.asc())
+                    .all()
+                )
+        except Exception:
+            return []
+
+        # Identify which tool records to keep (the most recent `max_tools`)
+        tool_records = [r for r in records if r.role == "tool"]
+        kept_tool_ids = {r.id for r in tool_records[-max_tools:]} if tool_records else set()
+        kept_tool_call_ids = {
+            r.tool_call_id for r in tool_records[-max_tools:] if r.tool_call_id
+        }
+
+        messages: list[dict] = []
+        for r in records:
+            if r.role == "tool" and r.id not in kept_tool_ids:
+                continue
+
+            msg = r.to_openai_message()
+
+            # If assistant message references tool_calls whose results were
+            # evicted, strip the tool_calls field to avoid confusing the model.
+            if r.role == "assistant" and msg.get("tool_calls"):
+                tc_ids = {tc["id"] for tc in msg["tool_calls"]}
+                if not tc_ids.issubset(kept_tool_call_ids):
+                    del msg["tool_calls"]
+
+            messages.append(msg)
+
+        # Refresh the system prompt with current runtime context
+        if messages and messages[0].get("role") == "system":
+            user_goal = ""
+            for m in messages:
+                if m.get("role") == "user":
+                    user_goal = m.get("content", "")
+                    break
+            new_prompt = self.agent._build_system_prompt(user_goal=user_goal)
+            messages[0]["content"] = new_prompt
+
+        return messages
+
     def _agent_run_wrapper(self, query: str):
         """Runs in a background thread."""
         try:
-            if self.sse_queue is not None and self._main_loop is not None:
-                asyncio.run_coroutine_threadsafe(
-                    self.sse_queue.put({"type": "system", "payload": "Agent started"}),
-                    self._main_loop,
-                )
+            self._broadcast_event({"type": "system", "payload": "Agent started"})
             callbacks = self._make_callbacks()
 
             def pause_check():
                 self._pause_event.wait()
 
             result = self.agent.run(query, callbacks=callbacks, pause_check=pause_check)
-            if self.sse_queue is not None and self._main_loop is not None:
-                asyncio.run_coroutine_threadsafe(
-                    self.sse_queue.put({"type": "done", "payload": result}),
-                    self._main_loop,
-                )
+            self._broadcast_event({"type": "done", "payload": result})
         except Exception as exc:
-            if self.sse_queue is not None and self._main_loop is not None:
-                asyncio.run_coroutine_threadsafe(
-                    self.sse_queue.put({"type": "error", "payload": str(exc)}),
-                    self._main_loop,
-                )
+            self._broadcast_event({"type": "error", "payload": str(exc)})
+        finally:
+            self._done = True
+
+    def _restore_run_wrapper(self, query: str = ""):
+        """Runs in a background thread after server restart.
+
+        Rebuilds message history from the database and resumes the loop.
+        """
+        try:
+            self._broadcast_event({"type": "system", "payload": "Agent resumed from snapshot"})
+            callbacks = self._make_callbacks()
+
+            def pause_check():
+                self._pause_event.wait()
+
+            messages = self._rebuild_messages(max_tools=15)
+            if query:
+                messages.append({"role": "user", "content": query})
+                self._persist_message(role="user", content=query)
+
+            result = self.agent.run(
+                callbacks=callbacks,
+                pause_check=pause_check,
+                initial_messages=messages,
+            )
+            self._broadcast_event({"type": "done", "payload": result})
+        except Exception as exc:
+            self._broadcast_event({"type": "error", "payload": str(exc)})
         finally:
             self._done = True
 
     async def start(self, query: str):
-        """Start the agent in a background thread."""
+        """Start the agent in a background thread.
+
+        The caller (e.g. api/agent.py) is responsible for holding
+        _start_lock around both the status check and this call so that
+        the whole check-and-start sequence is atomic.
+        """
         if self._run_future is not None and not self._run_future.done():
             raise RuntimeError("Agent is already running")
         self._done = False
         self._main_loop = asyncio.get_running_loop()
-        self.sse_queue = asyncio.Queue()
         self._queue_ready.set()
         # Persist the user's query as a user message before the agent starts.
         self._persist_message(role="user", content=query)
         loop = self._main_loop
         self._run_future = loop.run_in_executor(self._executor, self._agent_run_wrapper, query)
 
+    async def restore_and_resume(self, query: str = ""):
+        """Restore a session after server restart and resume the agent loop."""
+        async with self._start_lock:
+            if self._run_future is not None and not self._run_future.done():
+                raise RuntimeError("Agent is already running")
+            self._done = False
+            self._main_loop = asyncio.get_running_loop()
+            self._queue_ready.set()
+            loop = self._main_loop
+            self._run_future = loop.run_in_executor(
+                self._executor, self._restore_run_wrapper, query
+            )
+
     async def submit_hook(self, content: str):
         self.agent.submit_hook(content)
         # Hooks become user messages in the agent loop — persist them too.
         self._persist_message(role="user", content=content)
-        if self.sse_queue is not None:
-            await self.sse_queue.put({"type": "hook_received", "payload": content})
+        self._broadcast_event({"type": "hook_received", "payload": content})
 
     async def iter_sse(self):
         """Async generator yielding SSE formatted lines.
 
-        Waits until the queue is ready (start() has been called) so that
-        consumers can connect before the agent begins running without
-        missing events.
+        Each caller gets an independent event queue so that multiple clients
+        can observe the same session without competing for events.
         """
         await self._queue_ready.wait()
-        if self.sse_queue is None:
-            return
-        while True:
-            try:
-                event = await asyncio.wait_for(self.sse_queue.get(), timeout=0.5)
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                if event.get("type") in ("done", "error"):
-                    break
-            except asyncio.TimeoutError:
-                if self._done and self.sse_queue.empty():
-                    break
-                yield ":heartbeat\n\n"
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=256)
+        with self._sse_queues_lock:
+            self._sse_queues.add(queue)
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=0.5)
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    if event.get("type") in ("done", "error"):
+                        break
+                except asyncio.TimeoutError:
+                    if self._done and queue.empty():
+                        break
+                    yield ":heartbeat\n\n"
+        finally:
+            with self._sse_queues_lock:
+                self._sse_queues.discard(queue)

@@ -12,6 +12,8 @@
   let isPaused = false;
   let tasks = [];
   let selectedTaskId = null;
+  let sseReconnectAttempts = 0;
+  const MAX_SSE_RECONNECT = 3;
 
   // ---- DOM Refs ----
   const $ = (s) => document.querySelector(s);
@@ -184,6 +186,7 @@
       currentSid = null;
       currentSession = null;
       disconnectSSE();
+      localStorage.removeItem('ion_current_sid');
       showWelcome();
     }
     await loadSessions();
@@ -193,6 +196,7 @@
   async function selectSession(sid) {
     if (eventSource) disconnectSSE();
     currentSid = sid;
+    localStorage.setItem('ion_current_sid', sid);
     selectedTaskId = null;
     closeDetail();
     const session = sessions.find(s => s.id === sid);
@@ -354,6 +358,7 @@
   // ---- SSE ----
   function connectSSE(sid) {
     disconnectSSE();
+    sseReconnectAttempts = 0;
     eventSource = new EventSource(`${API}/api/sessions/${sid}/stream`);
 
     eventSource.onmessage = (e) => {
@@ -367,10 +372,38 @@
 
     eventSource.onerror = () => {
       disconnectSSE();
-      if (!isPaused) {
-        updateStatus('completed');
-        showIdleUI();
-        loadSessions();
+      if (isPaused) return;
+      // Don't assume the task is completed — the connection may have
+      // dropped because of a network hiccup or page refresh. Poll the
+      // session status and reconnect if it is still running.
+      if (sseReconnectAttempts < MAX_SSE_RECONNECT) {
+        sseReconnectAttempts++;
+        const delay = 1000 * sseReconnectAttempts;
+        setTimeout(async () => {
+          if (!currentSid) return;
+          try {
+            const session = await api(`/api/sessions/${currentSid}`);
+            const idx = sessions.findIndex(s => s.id === currentSid);
+            if (idx >= 0) sessions[idx] = session;
+            if (currentSession) currentSession = session;
+            renderSessionList();
+
+            if (session.status === 'running') {
+              connectSSE(currentSid);
+              showRunningUI();
+            } else if (session.status === 'completed' || session.status === 'error') {
+              updateStatus(session.status);
+              showIdleUI();
+              await Promise.all([loadMessages(), loadTasks()]);
+              updateDownloadVisibility();
+            } else if (session.status === 'paused') {
+              updateStatus('paused');
+              showPausedUI();
+            }
+          } catch (_) {
+            // Leave UI as-is; next heartbeat or user action will refresh.
+          }
+        }, delay);
       }
     };
   }
@@ -1111,6 +1144,7 @@
       currentSession = null;
       selectedTaskId = null;
       tasks = [];
+      localStorage.removeItem('ion_current_sid');
       renderSessionList();
       showWelcome();
     };
@@ -1193,6 +1227,11 @@
     bindEvents();
     try {
       await loadSessions();
+      // Restore previously selected session after page refresh
+      const savedSid = localStorage.getItem('ion_current_sid');
+      if (savedSid && sessions.some(s => s.id === savedSid)) {
+        await selectSession(savedSid);
+      }
     } catch (err) {
       toast('Failed to load sessions: ' + err.message, 'error');
     }
