@@ -1,4 +1,5 @@
 import json
+import os
 import queue
 import re
 import time
@@ -119,6 +120,14 @@ def _format_history_for_summary(messages: list[dict]) -> str:
     for msg in messages:
         role = msg.get("role", "unknown")
         content = msg.get("content") or ""
+        # Multimodal messages may have content as a list of blocks
+        if isinstance(content, list):
+            texts = [
+                part.get("text", "")
+                for part in content
+                if isinstance(part, dict) and part.get("type") == "text"
+            ]
+            content = " ".join(texts)
         if role == "assistant" and msg.get("tool_calls"):
             tc_lines = []
             for tc in msg.get("tool_calls", []):
@@ -413,6 +422,16 @@ def run_one_turn(
                 output = dispatch(name, **args)
                 duration = (time.time() - start) * 1000
 
+                # Strip _attachments from output so it doesn't bloat tool result text
+                image_attachments: list[dict] = []
+                try:
+                    parsed_output = json.loads(output)
+                    if isinstance(parsed_output, dict) and "_attachments" in parsed_output:
+                        image_attachments = parsed_output.pop("_attachments")
+                        output = json.dumps(parsed_output, ensure_ascii=False)
+                except Exception:
+                    pass
+
                 if logger:
                     logger.log_tool_call(name, args, output, duration)
                 if callbacks:
@@ -427,6 +446,43 @@ def run_one_turn(
                         "content": output,
                     }
                 )
+
+                # If model supports vision, inject screenshot as a follow-up user message
+                if image_attachments and os.getenv("MODEL_SUPPORTS_VISION", "").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                ):
+                    try:
+                        import base64
+
+                        content_blocks: list[dict] = []
+                        for att in image_attachments:
+                            if att.get("type") == "image":
+                                img_path = att.get("path")
+                                if img_path and os.path.exists(img_path):
+                                    with open(img_path, "rb") as f:
+                                        b64 = base64.b64encode(f.read()).decode()
+                                    content_blocks.append(
+                                        {
+                                            "type": "image_url",
+                                            "image_url": {
+                                                "url": f"data:{att.get('mime', 'image/png')};base64,{b64}"
+                                            },
+                                        }
+                                    )
+                        if content_blocks:
+                            state.messages.append(
+                                {
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "text", "text": f"[{name} screenshot]"},
+                                        *content_blocks,
+                                    ],
+                                }
+                            )
+                    except Exception:
+                        pass
 
         state.turn_count += 1
         state.finish_reason = finish_reason
@@ -755,7 +811,16 @@ def run_subagent_loop(
             # --- budget checks (post-turn) ---
             latest_content = ""
             if state.messages:
-                latest_content = state.messages[-1].get("content", "") or ""
+                raw_content = state.messages[-1].get("content", "") or ""
+                if isinstance(raw_content, list):
+                    texts = [
+                        part.get("text", "")
+                        for part in raw_content
+                        if isinstance(part, dict) and part.get("type") == "text"
+                    ]
+                    latest_content = " ".join(texts)
+                else:
+                    latest_content = raw_content
             budget_violation = tracker.check_budget(
                 budget, latest_content=latest_content, stop_conditions=stop_conditions
             )

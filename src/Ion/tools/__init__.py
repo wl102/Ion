@@ -12,3 +12,4 @@ from Ion.tools import web_search  # noqa: F401
 from Ion.tools import spawn_tool  # noqa: F401
 from Ion.tools import skill_tool  # noqa: F401
 from Ion.tools import task_tool  # noqa: F401
+from Ion.tools import browser_tool  # noqa: F401
