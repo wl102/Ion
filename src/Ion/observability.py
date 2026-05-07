@@ -96,6 +96,10 @@ class ObservabilityLogger:
         self.usage_stats["prompt_tokens"] += usage.get("prompt_tokens", 0)
         self.usage_stats["completion_tokens"] += usage.get("completion_tokens", 0)
         self.usage_stats["total_tokens"] += usage.get("total_tokens", 0)
+        # Persist incrementally so usage data survives runner eviction.
+        entry = self._base_entry()
+        entry.update({"event": "token_usage", "usage": dict(self.usage_stats)})
+        self._write("usage", entry)
 
     def log_compression(self, summary: str, original_turns: int):
         entry = self._base_entry()

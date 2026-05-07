@@ -75,7 +75,7 @@ class WebAgentRunner:
                     with next(self.db.get_session()) as sess:
                         record = MessageRecord(
                             session_id=self.session_id,
-                            role="event",
+                            role="event" if category != "usage" else "usage",
                             meta=json.dumps(entry, ensure_ascii=False),
                         )
                         sess.add(record)

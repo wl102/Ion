@@ -124,3 +124,17 @@ async def stream_events(sid: str, db: Session = Depends(get_db_session)):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/usage")
+async def get_usage(sid: str, db: Session = Depends(get_db_session)):
+    """Return token usage summary for a session."""
+    session = db.query(SessionRecord).filter_by(id=sid).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    runner = WebAgentRunner.get(sid)
+    if not runner:
+        raise HTTPException(status_code=409, detail="Agent not running")
+
+    return runner.logger.get_usage_summary()
