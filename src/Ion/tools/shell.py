@@ -72,7 +72,12 @@ async def _bash_exec(command: str) -> str:
                 pass
             await process.wait()
 
-            return tool_error(f"Execution timeout: exceeded {timeout}s")
+            return tool_error(
+                f"Execution timeout: exceeded {timeout}s. "
+                f"The command was killed. Apply the Timeout & Backoff Protocol: "
+                f"reduce scope by at least 50% (fewer ports, smaller wordlist, lower concurrency) "
+                f"and retry with lower aggression. Do NOT repeat the identical command."
+            )
 
         return_code = process.returncode
 

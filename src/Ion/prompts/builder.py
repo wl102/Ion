@@ -469,8 +469,32 @@ _TOOL_GUIDELINES = """\
   - Missing binary / command not found → **Use `python_exec` as the primary fallback**. Write a Python script with `requests` or `httpx` instead of relying on external scanners.
   - Wrong arguments / invalid syntax → Fix the arguments, do not retry identically.
   - Permission denied → Document the blocker and pivot to alternative approaches.
-  - Timeout / resource exhaustion → Reduce scope and retry with smaller inputs.
+  - Timeout / resource exhaustion → **Apply backoff: reduce scope and retry with smaller inputs**. See Timeout & Backoff Protocol below.
 - **Do not repeatedly invoke the same external tool** if it has failed 2+ times. Switch to `python_exec` or a different approach immediately.
+
+### Timeout & Backoff Protocol (MANDATORY for long-running tools)
+When a shell command (e.g., `nmap`, `nuclei`, `dirsearch`, `ffuf`) times out or runs significantly longer than expected, you MUST follow this backoff sequence — never retry the exact same command.
+
+**Backoff ladder:**
+1. **First timeout** → Reduce the command's scope by at least 50%:
+   - Port scans: `-p-` → `--top-ports 100` → `--top-ports 50` → `-p 22,80,443`.
+   - Template/concurrency scans: halve `-rl`, `-c`, and `-bs`.
+   - Wordlist scans: use a smaller wordlist or reduce depth.
+   - Lower timing aggression (e.g., `-T4` → `-T3`).
+   - Retry **once** with the reduced parameters.
+
+2. **Second timeout** → Reduce to the absolute minimum viable scope:
+   - Port scans: `-p 22,80,443` with `-T2` and `--host-timeout 30s`.
+   - Template scans: `-s critical` only, `-rl 10 -c 3 -bs 3`.
+   - Wordlist scans: top-100 entries only.
+   - Retry **once**.
+
+3. **Third failure** → Stop retrying. Report the blocker and pivot to:
+   - A different tool (`python_exec` with `requests`/`httpx`).
+   - A different angle (e.g., web probing instead of port scanning).
+   - A lighter reconnaissance approach.
+
+**Key rule**: Each retry MUST have a strictly smaller scope or lower resource usage than the previous attempt. Repeating the identical command after a timeout is a protocol violation.
 
 ### Python Environment Note
 - The Python interpreter runs in a virtual environment. When writing scripts that need additional packages, prefer using the standard library (`urllib`, `http.client`, `json`, `re`, `itertools`). If a third-party package is essential, install it via the venv path before importing.
