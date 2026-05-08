@@ -843,8 +843,20 @@ def run_subagent_loop(
                 continue
 
             if state.finish_reason != "tool_calls":
-                # Natural stop (stop, etc.)
+                # Natural stop (stop, etc.) — but if the model gave free-text
+                # instead of the required JSON object, force one more JSON-only
+                # turn so the parent gets structured findings rather than a
+                # narrative half-thought.
                 tracker.status_transitions.append(f"natural:{state.finish_reason}")
+                last_text = _latest_assistant_content(state)
+                if not _looks_like_result_json(last_text):
+                    _inject_termination_message(
+                        state, f"natural_stop_without_json:{state.finish_reason}"
+                    )
+                    _force_final_turn(
+                        client, model_id, state, tools, logger, agent_name,
+                        callbacks=callbacks, verbose=verbose,
+                    )
                 return _extract_result(state, tracker, WhyStopped.SUCCESS)
 
     except Exception as exc:
@@ -864,8 +876,24 @@ def _inject_termination_message(state: LoopState, reason: str):
     """Append a system message forcing the model to terminate with JSON."""
     msg = (
         f"\n[SYSTEM] Execution halted: {reason}.\n"
-        "You must now output ONLY a single JSON object matching the required "
-        "result schema. No additional text, no markdown fences, no explanations."
+        "You must now output ONLY a single JSON object matching the schema:\n"
+        "{\n"
+        '  "status": "completed|partial|blocked|failed|wrong_agent|needs_parent|budget_exhausted",\n'
+        '  "summary": "<one-sentence conclusion>",\n'
+        '  "confidence": "low|medium|high",\n'
+        '  "success_criteria_met": true|false,\n'
+        '  "key_findings": ["<concrete finding from tool output>", ...],\n'
+        '  "evidence": [{"type": "tool_output", "value": "<snippet>", "source": "<tool>"}, ...],\n'
+        '  "attempted_actions": [{"action": "<tool+args>", "result": "success|failed|no_signal", "why": "<reason>"}, ...],\n'
+        '  "artifacts": [{"path": "<file path>", "description": "..."}, ...],\n'
+        '  "why_stopped": "success|blocked|no_progress|budget_exhausted|tool_limit|wrong_capability|low_success_rate|same_error_limit",\n'
+        '  "recommended_next_action": "...",\n'
+        '  "recommended_owner": "parent|same_agent|other_agent",\n'
+        '  "next_agent": null\n'
+        "}\n"
+        "Populate `key_findings`, `evidence`, and `attempted_actions` from the tool outputs you observed. "
+        "Empty arrays mean the parent will not know what you tried — fill them.\n"
+        "No markdown fences, no extra text outside the JSON object."
     )
     state.messages.append({"role": "system", "content": msg})
 
@@ -928,8 +956,320 @@ def _extract_result(
     elif result.status == SubagentStatus.FAILED and why == WhyStopped.STOP_CONDITION:
         result.status = SubagentStatus.BLOCKED
 
+    # Auto-enrich empty list fields from tool calls + tool results in messages.
+    # The model is expected to populate these, but K-class small models often
+    # leave them empty. Without this fallback the parent agent has no idea
+    # which tools were run and ends up re-doing the work.
+    synth = _synthesize_from_messages(state.messages)
+    if not result.attempted_actions and synth["attempted_actions"]:
+        result.attempted_actions = synth["attempted_actions"]
+    if not result.evidence and synth["evidence"]:
+        result.evidence = synth["evidence"]
+    if not result.artifacts and synth["artifacts"]:
+        result.artifacts = synth["artifacts"]
+    if not result.key_findings and synth["key_findings"]:
+        result.key_findings = synth["key_findings"]
+
     # If still failed but we have key findings, mark as partial
     if result.status == SubagentStatus.FAILED and result.key_findings:
         result.status = SubagentStatus.PARTIAL
 
     return result
+
+
+def _latest_assistant_content(state: LoopState) -> str:
+    """Return text content of the most recent assistant message, or empty string."""
+    for msg in reversed(state.messages):
+        if msg.get("role") == "assistant":
+            content = msg.get("content") or ""
+            if isinstance(content, list):
+                texts = [
+                    part.get("text", "")
+                    for part in content
+                    if isinstance(part, dict) and part.get("type") == "text"
+                ]
+                content = " ".join(texts)
+            if content:
+                return content
+    return ""
+
+
+def _looks_like_result_json(text: str) -> bool:
+    """Best-effort check that text contains a JSON object with a 'status' field."""
+    if not text:
+        return False
+    candidate = text.strip()
+    # Strip ```json ... ``` fence if present
+    if "```json" in candidate:
+        candidate = candidate.split("```json", 1)[-1].split("```", 1)[0].strip()
+    if not (candidate.startswith("{") and candidate.endswith("}")):
+        return False
+    try:
+        data = json.loads(candidate)
+    except Exception:
+        return False
+    return isinstance(data, dict) and "status" in data
+
+
+def _extract_paths_from_command(cmd: str) -> list[str]:
+    """Pull output-file paths out of a shell command string.
+
+    Catches the common nmap/curl/etc. patterns:
+      ``-o /path``, ``-oA /path``, ``-oN /path``, ``-oG /path`` (nmap variants)
+      ``--output /path``, ``--output=/path``, ``-o=/path``
+      ``> /path``, ``>> /path`` (stdout/stderr redirects)
+      ``tee /path``, ``tee -a /path``
+
+    Only returns paths that look like absolute or workspace-rooted files.
+    """
+    if not cmd or not isinstance(cmd, str):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(p: str) -> None:
+        p = p.strip().strip('"').strip("'")
+        if not p or p in seen:
+            return
+        # Filter to anything that plausibly references a path
+        if not (p.startswith("/") or p.startswith("./") or p.startswith("~")):
+            return
+        seen.add(p)
+        out.append(p)
+
+    # nmap-style flags (-o, -oA, -oN, -oG, -oX, -oS), curl/wget --output, etc.
+    for m in re.finditer(
+        r"(?:^|\s)-o[ANGXS]?(?:=|\s+)(\S+)",
+        cmd,
+    ):
+        _add(m.group(1))
+    for m in re.finditer(r"--output(?:=|\s+)(\S+)", cmd):
+        _add(m.group(1))
+    # Output redirects
+    for m in re.finditer(r"(?:^|\s)>{1,2}\s*(\S+)", cmd):
+        _add(m.group(1))
+    # tee / tee -a
+    for m in re.finditer(r"\btee\s+(?:-a\s+)?(\S+)", cmd):
+        _add(m.group(1))
+
+    return out
+
+
+def _action_tag(tool_name: str, args_obj: dict | str | None) -> str:
+    """Pick a per-call tag for ``key_findings``. For shell-style wrappers,
+    prefer the actual program being run (``nmap``, ``curl``, ...) over the
+    wrapper name (``bash``) so the parent can tell calls apart."""
+    name = (tool_name or "").lower()
+    shell_names = ("bash", "sh", "shell", "exec", "run_shell", "execute")
+    if name not in shell_names or not isinstance(args_obj, dict):
+        return tool_name or "tool"
+
+    # Tokens that prefix the *real* command without being it.
+    skip_prefixes = {"sudo", "time", "nice", "ionice", "stdbuf", "exec", "env"}
+
+    for key in ("command", "cmd", "script", "code", "shell"):
+        v = args_obj.get(key)
+        if not isinstance(v, str) or not v.strip():
+            continue
+        tokens = v.strip().split()
+        for tok in tokens:
+            # Skip env-var assignments (FOO=bar) and known prefix words.
+            if "=" in tok and not tok.startswith("/") and not tok.startswith("-"):
+                continue
+            if tok in skip_prefixes:
+                continue
+            # Drop a leading directory like `/usr/bin/nmap`
+            if "/" in tok:
+                tok = tok.rsplit("/", 1)[-1]
+            if tok and tok.replace("_", "").replace("-", "").replace(".", "").isalnum():
+                return f"{tool_name}:{tok}"
+            return tool_name
+        return tool_name
+    return tool_name
+
+
+def _synthesize_from_messages(messages: list[dict]) -> dict[str, list]:
+    """Build a compact safety-net summary from tool calls when the subagent
+    forgot to populate the structured fields.
+
+    Design intent: the whole point of delegating to a subagent is to compress
+    context for the parent. Re-injecting raw tool output into ``evidence``
+    would defeat that. So this helper is deliberately stingy:
+
+    - ``attempted_actions``: compact "tool(arg=val) -> success|failed" entries.
+      Lets the parent know what was tried so it does not redo the same work.
+    - ``artifacts``: file paths only (declared as arguments, or output redirects
+      embedded inside shell commands). The parent can read them on demand.
+    - ``key_findings``: ONE per-tool summary line ("nmap returned 320 chars,
+      classified success") — a header note, not a content dump.
+    - ``evidence``: intentionally NOT auto-populated. Curating evidence is
+      the model's job; if it skipped, the parent gets the action list and
+      artifact paths and decides whether to dig deeper.
+    """
+    from Ion.subagent_models import AttemptedAction, Artifact
+
+    ordered_calls: list[tuple[str, str, str]] = []  # (id, name, args_json)
+
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        for tc in msg.get("tool_calls") or []:
+            tc_id = tc.get("id", "")
+            fn = tc.get("function", {}) or {}
+            name = fn.get("name", "") or ""
+            args = fn.get("arguments", "") or ""
+            if isinstance(args, dict):
+                try:
+                    args = json.dumps(args, ensure_ascii=False)
+                except Exception:
+                    args = str(args)
+            ordered_calls.append((tc_id, name, args))
+
+    # Map tool_call_id -> tool result content (kept around only for length /
+    # classification — never copied into evidence).
+    result_map: dict[str, str] = {}
+    for msg in messages:
+        if msg.get("role") != "tool":
+            continue
+        tc_id = msg.get("tool_call_id", "")
+        content = msg.get("content", "") or ""
+        if isinstance(content, list):
+            texts = [
+                part.get("text", "")
+                for part in content
+                if isinstance(part, dict) and part.get("type") == "text"
+            ]
+            content = " ".join(texts)
+        result_map[tc_id] = str(content)
+
+    attempted: list[AttemptedAction] = []
+    artifacts: list[Artifact] = []
+    key_findings: list[str] = []
+    seen_artifact_paths: set[str] = set()
+
+    # Args that *are* the action (don't truncate them aggressively).
+    _COMMAND_KEYS = ("command", "cmd", "script", "code", "shell")
+
+    for tc_id, name, args in ordered_calls:
+        raw_result = result_map.get(tc_id, "")
+        result_kind = _classify_tool_result(raw_result)
+
+        try:
+            args_obj = json.loads(args) if args else {}
+        except Exception:
+            args_obj = {}
+
+        # Build action preview. For command-style args, the command IS the
+        # action — give it ~200 chars instead of the default 60.
+        if isinstance(args_obj, dict):
+            preview_parts = []
+            for k, v in list(args_obj.items())[:4]:
+                limit = 200 if k.lower() in _COMMAND_KEYS else 60
+                preview_parts.append(f"{k}={_short(str(v), limit)}")
+            arg_preview = ", ".join(preview_parts)
+        else:
+            arg_preview = _short(str(args), 200)
+        action_text = f"{name}({arg_preview})" if arg_preview else name
+
+        why_text = ""
+        if result_kind == "failed":
+            why_text = _short(_first_error_line(raw_result), 200)
+        elif result_kind == "no_signal":
+            why_text = "empty or non-actionable response"
+
+        attempted.append(
+            AttemptedAction(action=action_text, result=result_kind, why=why_text)
+        )
+
+        # Artifacts pass 1: explicit file/output path arguments.
+        if isinstance(args_obj, dict):
+            for k, v in args_obj.items():
+                if not isinstance(v, str) or not v:
+                    continue
+                kl = k.lower()
+                if any(t in kl for t in ("path", "file", "output", "out_dir")):
+                    if v in seen_artifact_paths:
+                        continue
+                    seen_artifact_paths.add(v)
+                    artifacts.append(
+                        Artifact(path=v, description=f"argument to {name}")
+                    )
+
+        # Artifacts pass 2: paths embedded inside shell command strings
+        # (`-oA /tmp/x`, `--output=/tmp/y`, `> /tmp/z`, `tee /tmp/w`, etc.).
+        if isinstance(args_obj, dict):
+            for k, v in args_obj.items():
+                if k.lower() not in _COMMAND_KEYS or not isinstance(v, str):
+                    continue
+                for path in _extract_paths_from_command(v):
+                    if path in seen_artifact_paths:
+                        continue
+                    seen_artifact_paths.add(path)
+                    artifacts.append(
+                        Artifact(path=path, description=f"output of {name}")
+                    )
+
+        # Per-tool header note (NOT content). For shell-style tools, prefer
+        # the actual program name (`nmap`, `curl`, ...) over the wrapper name
+        # so multiple bash calls are distinguishable.
+        if raw_result:
+            tag = _action_tag(name, args_obj)
+            key_findings.append(
+                f"[{tag}] {result_kind}, {len(raw_result)} chars of output"
+            )
+
+    return {
+        "attempted_actions": attempted[-20:],
+        # Evidence is the model's job; we never auto-fill it.
+        "evidence": [],
+        "artifacts": artifacts[-15:],
+        # Header notes only — one short line per tool call.
+        "key_findings": key_findings[-20:],
+    }
+
+
+def _classify_tool_result(content: str) -> str:
+    """Classify a tool result as 'success', 'failed', or 'no_signal'."""
+    if not content:
+        return "no_signal"
+    stripped = content.strip()
+    if not stripped:
+        return "no_signal"
+    head = stripped[:300].lower()
+    # Explicit error envelopes
+    if stripped.startswith('{"error"') or '"error":' in stripped[:200]:
+        return "failed"
+    if any(token in head for token in (
+        "traceback", "exception:", "permission denied", "command not found",
+        "connection refused", "timeout", "failed", "unreachable",
+    )):
+        # But "failed" alone is not enough — many tools emit benign "0 failed"
+        if "0 failed" in head or "no failed" in head:
+            pass
+        else:
+            return "failed"
+    return "success"
+
+
+def _first_error_line(content: str) -> str:
+    """Return the first non-empty line that looks like an error message."""
+    for line in content.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        sl = s.lower()
+        if any(t in sl for t in ("error", "exception", "traceback", "failed", "denied", "refused")):
+            return s
+    # Fallback to first non-empty line
+    for line in content.splitlines():
+        s = line.strip()
+        if s:
+            return s
+    return ""
+
+
+def _short(text: str, n: int) -> str:
+    if not text:
+        return ""
+    text = text.replace("\n", " ").strip()
+    return text if len(text) <= n else text[: n - 1] + "…"
