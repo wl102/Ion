@@ -702,15 +702,21 @@ BROWSER_EXECUTE_SCHEMA = {
     "function": {
         "name": "browser_execute",
         "description": (
-            "Run a real Chromium browser to verify exploits and inspect SPA/DOM behavior. "
-            "Captures every HTTP request and response (including XHR/fetch/WebSocket), "
+            "Run a real Chromium browser to VERIFY exploits (especially XSS) and inspect SPA/DOM behavior. "
+            "This is the VERIFIER layer: http_request finds suspected vulnerabilities; browser_execute "
+            "confirms them in a real browser where DOM, JS execution, postMessage, CSP, and SPA behavior are observable. "
+            "Captures every HTTP request/response (including XHR/fetch/WebSocket), "
             "hooks XSS sinks (innerHTML, insertAdjacentHTML, eval, document.write, "
             "setAttribute on event handlers, alert/confirm/prompt, Function constructor, etc.), "
-            "records console output, page errors, and JS dialogs. Use this AFTER an HTTP-tool "
-            "finding to confirm whether a payload truly executes — not for fast fuzzing. "
+            "records console output, page errors, and JS dialogs. "
+            "Use this AFTER an HTTP-tool finding to confirm whether a payload truly executes — not for fast fuzzing. "
             "The first action defaults to navigating to `url`; supply `actions` to interact "
             "with the page (click, type, evaluate JS, screenshot, etc.)."
-            "\n\nExample: "
+            "\n\nXSS Verification Example: "
+            'browser_execute(url="http://target/search?q=<svg/onload=alert(1)>", hook_xss_sinks=true, actions=[{"type":"wait_ms","ms":500}]) → '
+            "check result.xss_sinks (non-empty = confirmed) and result.dialogs (alert/confirm/prompt = confirmed). "
+            "If result.summary.verdict == 'exploit_triggered', the XSS is real."
+            "\n\nForm-based XSS Example: "
             'actions=[{"type": "fill", "selector": "input[name=q]", "text": "<svg/onload=alert(1)>"}, '
             '{"type": "click", "selector": "button[type=submit]"}, '
             '{"type": "wait_for_load", "state": "networkidle"}]'
