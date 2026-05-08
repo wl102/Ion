@@ -3,7 +3,6 @@ from datetime import datetime
 from typing import Any, Optional, List
 
 from sqlalchemy import (
-    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -32,9 +31,6 @@ class SessionRecord(Base):
     )
 
     tasks: Mapped[List["TaskRecord"]] = relationship(
-        back_populates="session", cascade="all, delete-orphan"
-    )
-    hooks: Mapped[List["HookRecord"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
     messages: Mapped[List["MessageRecord"]] = relationship(
@@ -99,29 +95,6 @@ class TaskRecord(Base):
             "key_findings": json.loads(self.key_findings) if self.key_findings else [],
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
-
-
-class HookRecord(Base):
-    __tablename__ = "hooks"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    session_id: Mapped[str] = mapped_column(
-        ForeignKey("sessions.id", ondelete="CASCADE"), index=True
-    )
-    content: Mapped[str] = mapped_column(Text)
-    consumed: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-
-    session: Mapped["SessionRecord"] = relationship(back_populates="hooks")
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "session_id": self.session_id,
-            "content": self.content,
-            "consumed": self.consumed,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
 

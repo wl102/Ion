@@ -395,7 +395,7 @@ def run_one_turn(
         if callbacks:
             cb = callbacks.get("on_assistant_end")
             if cb:
-                cb(message_id, agent_name=agent_name)
+                cb(message_id, agent_name=agent_name, tool_calls=tool_calls_data)
 
         if finish_reason == "tool_calls":
             tool_names = [t["function"]["name"] for t in tool_calls_data]
@@ -437,7 +437,7 @@ def run_one_turn(
                 if callbacks:
                     cb = callbacks.get("on_tool_result")
                     if cb:
-                        cb(name, output, duration, agent_name=agent_name, arguments=args)
+                        cb(name, output, duration, agent_name=agent_name, arguments=args, tool_call_id=tool["id"])
 
                 state.messages.append(
                     {

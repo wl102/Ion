@@ -231,17 +231,18 @@ class WebAgentRunner:
                 "agent_name": agent_name,
             })
 
-        def on_assistant_end(message_id: str, agent_name: str = "root", **_):
+        def on_assistant_end(message_id: str, agent_name: str = "root", tool_calls: list[dict] | None = None, **_):
             buf = self._assistant_buffers.pop(message_id or "", None)
             if buf is not None:
                 content = "".join(buf.content) or None
                 reasoning = "".join(buf.reasoning) or None
-                if content or reasoning:
+                if content or reasoning or tool_calls:
                     self._persist_message(
                         role="assistant",
                         content=content,
                         reasoning_content=reasoning,
                         message_id=message_id or "",
+                        tool_calls=tool_calls,
                     )
             put_event({
                 "type": "assistant_end",
@@ -262,6 +263,7 @@ class WebAgentRunner:
             duration_ms: float,
             agent_name: str = "root",
             arguments: dict | None = None,
+            tool_call_id: str = "",
             **_,
         ):
             # Persist full tool output (no truncation in DB).
@@ -269,6 +271,7 @@ class WebAgentRunner:
                 role="tool",
                 content=output,
                 tool_name=name,
+                tool_call_id=tool_call_id,
                 duration_ms=round(duration_ms, 2),
                 arguments=arguments,
             )
@@ -388,7 +391,8 @@ class WebAgentRunner:
             return []
 
         # Identify which tool records to keep (the most recent `max_tools`)
-        tool_records = [r for r in records if r.role == "tool"]
+        # Only keep well-formed tool records that have a tool_call_id.
+        tool_records = [r for r in records if r.role == "tool" and r.tool_call_id]
         kept_tool_ids = {r.id for r in tool_records[-max_tools:]} if tool_records else set()
         kept_tool_call_ids = {
             r.tool_call_id for r in tool_records[-max_tools:] if r.tool_call_id
@@ -396,7 +400,8 @@ class WebAgentRunner:
 
         messages: list[dict] = []
         for r in records:
-            if r.role == "tool" and r.id not in kept_tool_ids:
+            # Skip malformed tool messages (missing tool_call_id) entirely
+            if r.role == "tool" and (r.id not in kept_tool_ids or not r.tool_call_id):
                 continue
 
             msg = r.to_openai_message()
@@ -407,6 +412,9 @@ class WebAgentRunner:
                 tc_ids = {tc["id"] for tc in msg["tool_calls"]}
                 if not tc_ids.issubset(kept_tool_call_ids):
                     del msg["tool_calls"]
+                    # Ensure the message remains valid (has content or tool_calls)
+                    if not msg.get("content"):
+                        msg["content"] = "[Earlier tool calls omitted]"
 
             messages.append(msg)
 
@@ -422,7 +430,7 @@ class WebAgentRunner:
 
         return messages
 
-    def _agent_run_wrapper(self, query: str):
+    def _agent_run_wrapper(self, messages: list[dict]):
         """Runs in a background thread."""
         try:
             self._broadcast_event({"type": "system", "payload": "Agent started"})
@@ -431,70 +439,66 @@ class WebAgentRunner:
             def pause_check():
                 self._pause_event.wait()
 
-            result = self.agent.run(query, callbacks=callbacks, pause_check=pause_check)
-            self._broadcast_event({"type": "done", "payload": result})
-        except Exception as exc:
-            self._broadcast_event({"type": "error", "payload": str(exc)})
-        finally:
-            self._done = True
-
-    def _restore_run_wrapper(self, query: str = ""):
-        """Runs in a background thread after server restart.
-
-        Rebuilds message history from the database and resumes the loop.
-        """
-        try:
-            self._broadcast_event({"type": "system", "payload": "Agent resumed from snapshot"})
-            callbacks = self._make_callbacks()
-
-            def pause_check():
-                self._pause_event.wait()
-
-            messages = self._rebuild_messages(max_tools=15)
-            if query:
-                messages.append({"role": "user", "content": query})
-                self._persist_message(role="user", content=query)
-
             result = self.agent.run(
+                "",
                 callbacks=callbacks,
                 pause_check=pause_check,
                 initial_messages=messages,
             )
             self._broadcast_event({"type": "done", "payload": result})
         except Exception as exc:
-            self._broadcast_event({"type": "error", "payload": str(exc)})
+            import traceback
+            err = f"{exc}\n{traceback.format_exc()}"
+            print(f"[AGENT ERROR] {err}")
+            self._broadcast_event({"type": "error", "payload": err})
         finally:
             self._done = True
 
+    async def _do_start(self, messages: list[dict]) -> None:
+        """Core start logic shared by start() and restore_and_resume()."""
+        if self._run_future is not None and not self._run_future.done():
+            raise RuntimeError("Agent is already running")
+        self._done = False
+        self._main_loop = asyncio.get_running_loop()
+        # Use a fresh Event so that stale SSE connections from a previous run
+        # don't race with the new one.
+        self._queue_ready = asyncio.Event()
+        self._queue_ready.set()
+        self._assistant_buffers.clear()
+        loop = self._main_loop
+        self._run_future = loop.run_in_executor(
+            self._executor, self._agent_run_wrapper, messages
+        )
+
     async def start(self, query: str):
         """Start the agent in a background thread.
+
+        Rebuilds message history from the database so that every new task
+        within a session retains full conversation context.
 
         The caller (e.g. api/agent.py) is responsible for holding
         _start_lock around both the status check and this call so that
         the whole check-and-start sequence is atomic.
         """
-        if self._run_future is not None and not self._run_future.done():
-            raise RuntimeError("Agent is already running")
-        self._done = False
-        self._main_loop = asyncio.get_running_loop()
-        self._queue_ready.set()
-        # Persist the user's query as a user message before the agent starts.
+        messages = self._rebuild_messages(max_tools=15)
+        if not messages or messages[0].get("role") != "system":
+            system_prompt = self.agent._build_system_prompt(user_goal=query)
+            messages.insert(0, {"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": query})
         self._persist_message(role="user", content=query)
-        loop = self._main_loop
-        self._run_future = loop.run_in_executor(self._executor, self._agent_run_wrapper, query)
+        await self._do_start(messages)
 
     async def restore_and_resume(self, query: str = ""):
         """Restore a session after server restart and resume the agent loop."""
         async with self._start_lock:
-            if self._run_future is not None and not self._run_future.done():
-                raise RuntimeError("Agent is already running")
-            self._done = False
-            self._main_loop = asyncio.get_running_loop()
-            self._queue_ready.set()
-            loop = self._main_loop
-            self._run_future = loop.run_in_executor(
-                self._executor, self._restore_run_wrapper, query
-            )
+            messages = self._rebuild_messages(max_tools=15)
+            if not messages or messages[0].get("role") != "system":
+                system_prompt = self.agent._build_system_prompt(user_goal=query)
+                messages.insert(0, {"role": "system", "content": system_prompt})
+            if query:
+                messages.append({"role": "user", "content": query})
+                self._persist_message(role="user", content=query)
+            await self._do_start(messages)
 
     async def submit_hook(self, content: str):
         self.agent.submit_hook(content)

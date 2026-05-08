@@ -6,7 +6,7 @@ from starlette.responses import StreamingResponse
 
 from Ion.db import Database, get_default_db
 from Ion.db.models import SessionRecord
-from Ion.web.schemas import RunRequest, HookRequest
+from Ion.web.schemas import RunRequest
 from Ion.web.agent_runner import WebAgentRunner
 
 router = APIRouter()
@@ -38,19 +38,6 @@ async def run_agent(sid: str, req: RunRequest, db: Session = Depends(get_db_sess
         await runner.start(req.query)
 
     return {"status": "started", "session_id": sid}
-
-
-@router.post("/hook")
-async def submit_hook(sid: str, req: HookRequest, db: Session = Depends(get_db_session)):
-    session = db.query(SessionRecord).filter_by(id=sid).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    runner = WebAgentRunner.get(sid)
-    if not runner:
-        raise HTTPException(status_code=409, detail="Agent not running")
-    await runner.submit_hook(req.content)
-    return {"status": "hook_submitted", "session_id": sid}
 
 
 @router.post("/interrupt")

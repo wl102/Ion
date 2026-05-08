@@ -41,10 +41,6 @@ class RunRequest(BaseModel):
     query: str
 
 
-class HookRequest(BaseModel):
-    content: str
-
-
 class SSEEvent(BaseModel):
     type: str  # system | assistant | tool_start | tool_result | task_update | hook_received | subagent_start | subagent_end | done | error
     payload: Any
