@@ -1,0 +1,18 @@
+services:
+  ion:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: ion:latest
+    container_name: ion-agent
+    ports:
+      - "${ION_PORT:-8000}:8000"
+    volumes:
+      - ./data:/opt/ion/data
+      - ./logs:/opt/ion/logs
+    env_file:
+      - .env
+    # Uncomment for host networking (useful for pentest scans)
+    # network_mode: host
+    restart: unless-stopped
+    command: ["web"]
