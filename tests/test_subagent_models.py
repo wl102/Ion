@@ -91,7 +91,10 @@ class TestSubagentResultParsing(unittest.TestCase):
     def test_from_raw_output_fallback(self):
         raw = "This is just plain text with no JSON."
         result = SubagentResult.from_raw_output(raw)
-        self.assertEqual(result.status, SubagentStatus.PARTIAL)
+        # Natural-language-first: text becomes the summary; status defaults to
+        # FAILED so that _extract_result can infer the correct terminal status
+        # from why_stopped (SUCCESS → COMPLETED, etc.).
+        self.assertEqual(result.status, SubagentStatus.FAILED)
         self.assertEqual(result.summary, raw)
 
 

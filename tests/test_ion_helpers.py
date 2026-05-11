@@ -12,17 +12,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from Ion.ion import (
     LoopState,
     _action_tag,
+    _build_fallback_summary,
     _classify_tool_result,
     _extract_paths_from_command,
     _extract_result,
     _first_error_line,
     _latest_assistant_content,
-    _looks_like_result_json,
+    _looks_like_task_summary,
+    _pick_finding_snippet,
     _short,
+    _summary_looks_unusable,
     _synthesize_from_messages,
 )
 from Ion.subagent_models import (
     SubagentLoopTracker,
+    SubagentResult,
     SubagentStatus,
     WhyStopped,
 )
@@ -87,29 +91,46 @@ class TestFirstErrorLine(unittest.TestCase):
         self.assertEqual(_first_error_line(""), "")
 
 
-class TestLooksLikeResultJson(unittest.TestCase):
-    def test_bare_json(self):
-        self.assertTrue(_looks_like_result_json('{"status": "completed", "summary": "x"}'))
-
-    def test_fenced_json(self):
-        text = '```json\n{"status": "partial", "summary": "x"}\n```'
-        self.assertTrue(_looks_like_result_json(text))
-
-    def test_narrative_text_not_json(self):
-        self.assertFalse(
-            _looks_like_result_json(
-                "Excellent! Port scan complete. Found 18 open ports."
+class TestLooksLikeTaskSummary(unittest.TestCase):
+    def test_substantial_summary(self):
+        self.assertTrue(
+            _looks_like_task_summary(
+                "Host 192.168.2.17 is up. Open ports: 22/tcp ssh, 80/tcp http, 3389/tcp rdp."
             )
         )
 
-    def test_empty(self):
-        self.assertFalse(_looks_like_result_json(""))
+    def test_short_text_not_summary(self):
+        self.assertFalse(_looks_like_task_summary("Done."))
+        self.assertFalse(_looks_like_task_summary("OK"))
+        self.assertFalse(_looks_like_task_summary(""))
 
-    def test_json_without_status(self):
-        self.assertFalse(_looks_like_result_json('{"foo": "bar"}'))
+    def test_planning_preamble_rejected(self):
+        self.assertFalse(
+            _looks_like_task_summary("首先进行存活检测和快速端口扫描：")
+        )
+        self.assertFalse(
+            _looks_like_task_summary("Now I will scan the host.")
+        )
+        self.assertFalse(
+            _looks_like_task_summary("Plan: run nmap then check ports...")
+        )
 
-    def test_invalid_json(self):
-        self.assertFalse(_looks_like_result_json('{"status": "completed"'))
+    def test_mid_thought_punctuation_rejected(self):
+        self.assertFalse(_looks_like_task_summary("Port scan results:"))
+        self.assertFalse(_looks_like_task_summary("What about port 8080?"))
+
+    def test_json_metadata_alone_not_summary(self):
+        # Bare JSON with no natural-language text is NOT a task summary.
+        self.assertFalse(
+            _looks_like_task_summary('{"status": "completed", "confidence": "high"}')
+        )
+
+    def test_long_planning_ok_if_substantial(self):
+        long_ok = (
+            "First, I ran nmap against 10.0.0.1 and found 3 open ports: "
+            "22/tcp ssh, 80/tcp http, and 443/tcp https with self-signed cert."
+        )
+        self.assertTrue(_looks_like_task_summary(long_ok))
 
 
 class TestLatestAssistantContent(unittest.TestCase):
@@ -217,9 +238,10 @@ class TestSynthesizeFromMessages(unittest.TestCase):
         paths = [a.path for a in result["artifacts"]]
         self.assertIn("/tmp/nuclei.txt", paths)
 
-    def test_key_findings_are_header_notes_not_content(self):
-        # Key findings should be compact "what tool, what classification,
-        # how much output" lines — NOT the actual content.
+    def test_key_findings_carry_content_snippets(self):
+        # Key findings now carry short, content-bearing snippets so the
+        # parent agent gets actionable signal when the subagent fails to
+        # populate the JSON fields itself.
         result = _synthesize_from_messages(self._build_messages())
         joined = " ".join(result["key_findings"])
         # tool name appears
@@ -227,12 +249,13 @@ class TestSynthesizeFromMessages(unittest.TestCase):
         self.assertIn("nuclei_run", joined)
         # classification appears
         self.assertIn("success", joined)
-        # but raw output content does NOT (this was the regression we are fixing)
-        self.assertNotIn("22/tcp", joined)
-        self.assertNotIn("CVE-2024-1234", joined)
-        # And each finding is short
+        # content snippets appear (the whole point of the change)
+        self.assertIn("22/tcp", joined)
+        self.assertIn("CVE-2024-1234", joined)
+        # Each finding is still capped so it doesn't blow up context:
+        # header note + 3 lines of ~140 chars each + overhead ≪ 500 chars.
         for f in result["key_findings"]:
-            self.assertLess(len(f), 100)
+            self.assertLess(len(f), 500)
 
     def test_empty_messages(self):
         result = _synthesize_from_messages([])
@@ -263,6 +286,77 @@ class TestSynthesizeFromMessages(unittest.TestCase):
         ]
         result = _synthesize_from_messages(msgs)
         self.assertEqual(result["attempted_actions"][0].result, "failed")
+
+
+class TestSummaryQualityGate(unittest.TestCase):
+    """_summary_looks_unusable must catch common narrative-fragment traps."""
+
+    def test_catches_planning_preamble_cn(self):
+        self.assertTrue(_summary_looks_unusable("首先进行存活检测和快速端口扫描：\n"))
+        self.assertTrue(_summary_looks_unusable("接下来我将扫描主机："))
+
+    def test_catches_planning_preamble_en(self):
+        self.assertTrue(_summary_looks_unusable("Now I will scan the ports."))
+        self.assertTrue(_summary_looks_unusable("Let's run nmap."))
+        self.assertTrue(_summary_looks_unusable("I'll check the host status..."))
+        self.assertTrue(_summary_looks_unusable("Plan: do recon then exploit."))
+
+    def test_catches_mid_thought_punctuation(self):
+        self.assertTrue(_summary_looks_unusable("Port scan results:"))
+        self.assertTrue(_summary_looks_unusable("Open ports include..."))
+        self.assertTrue(_summary_looks_unusable("What about the next step?"))
+
+    def test_catches_too_short(self):
+        self.assertTrue(_summary_looks_unusable("Done."))
+        self.assertTrue(_summary_looks_unusable(""))
+
+    def test_passes_real_conclusions(self):
+        self.assertFalse(_summary_looks_unusable(
+            "Host 192.168.2.17 is up; TCP 22, 80, 3389 open; 443 filtered."
+        ))
+        self.assertFalse(_summary_looks_unusable(
+            "Could not reach host because all ports timed out."
+        ))
+        self.assertFalse(_summary_looks_unusable(
+            "XSS confirmed: payload reflected and executed."
+        ))
+
+    def test_planning_ok_when_long_enough(self):
+        # If the sentence is long enough, a planning starter is allowed
+        # because the rest likely contains the actual conclusion.
+        long_ok = (
+            "First, I ran nmap against 10.0.0.1 and found 3 open ports: "
+            "22/tcp ssh, 80/tcp http, and 443/tcp https with self-signed cert."
+        )
+        self.assertFalse(_summary_looks_unusable(long_ok))
+
+
+class TestPickFindingSnippet(unittest.TestCase):
+    """_pick_finding_snippet extracts actionable lines without tool noise."""
+
+    def test_filters_nmap_banners(self):
+        raw = (
+            "Starting Nmap 7.94\n"
+            "Nmap scan report for 10.0.0.1\n"
+            "Host is up (0.002s latency).\n"
+            "22/tcp open ssh\n"
+            "80/tcp open http\n"
+            "Nmap done: 1 IP address scanned.\n"
+        )
+        snippet = _pick_finding_snippet(raw)
+        self.assertNotIn("Starting Nmap", snippet)
+        self.assertNotIn("Nmap done", snippet)
+        self.assertIn("Host is up", snippet)
+        self.assertIn("22/tcp open", snippet)
+
+    def test_json_wrapper_unwrapped(self):
+        raw = json.dumps({"output": "CVE-2024-1234 found on /admin\nSecond line", "status": 200})
+        snippet = _pick_finding_snippet(raw)
+        self.assertIn("CVE-2024-1234", snippet)
+
+    def test_empty_input(self):
+        self.assertEqual(_pick_finding_snippet(""), "")
+        self.assertEqual(_pick_finding_snippet("   \n\n  "), "")
 
 
 class TestExtractResultEnrichment(unittest.TestCase):
@@ -310,7 +404,9 @@ class TestExtractResultEnrichment(unittest.TestCase):
         # Even though model didn't emit JSON, attempted_actions and key_findings
         # (header notes) must be filled from tool history so the parent does
         # NOT redo the same work.
-        self.assertEqual(result.status, SubagentStatus.PARTIAL)
+        # With natural-language-first contract, valid prose + why_stopped=SUCCESS
+        # maps to COMPLETED; the parent reads the summary to decide next steps.
+        self.assertEqual(result.status, SubagentStatus.COMPLETED)
         self.assertGreater(len(result.attempted_actions), 0,
                            "attempted_actions should be auto-populated from tool calls")
         self.assertGreater(len(result.key_findings), 0,
@@ -366,6 +462,98 @@ class TestExtractResultEnrichment(unittest.TestCase):
         self.assertEqual(len(result.evidence), 1)
         self.assertEqual(result.evidence[0].source, "manual")
         self.assertEqual(result.attempted_actions[0].action, "manual_check")
+
+    def test_bad_summary_is_replaced_when_goal_provided(self):
+        # Exact regression from bug report: model produced a planning preamble
+        # instead of a conclusion. With goal passed in, _extract_result must
+        # replace the garbage summary with an auto-synthesized one.
+        state = LoopState(messages=[
+            {"role": "user", "content": "scan 192.168.2.17"},
+            {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": json.dumps({"command": "nmap -sn 192.168.2.17"})},
+                }],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "c1",
+                "content": "Host: 192.168.2.17 Status: Up",
+            },
+            {
+                "role": "assistant",
+                "content": "首先进行存活检测和快速端口扫描：\n",
+            },
+        ])
+        tracker = SubagentLoopTracker()
+        result = _extract_result(state, tracker, WhyStopped.SUCCESS, goal="对 192.168.2.17 做存活检测和快速端口扫描")
+        self.assertTrue(result.summary.startswith("[auto-synthesized]"))
+        self.assertIn("192.168.2.17", result.summary)
+        self.assertIn("goal", result.summary)
+        # goal_recap backfilled from goal
+        self.assertTrue(result.goal_recap)
+        self.assertIn("192.168.2.17", result.goal_recap)
+        # key_findings carry actual content
+        self.assertTrue(any("Host: 192.168.2.17" in f for f in result.key_findings))
+
+    def test_good_summary_preserved(self):
+        # A real conclusion should survive the quality gate.
+        state = LoopState(messages=[
+            {"role": "assistant", "content": json.dumps({
+                "status": "completed",
+                "summary": "Host 10.0.0.1 is up; TCP 22 and 80 open.",
+                "confidence": "high",
+                "key_findings": [],
+                "evidence": [],
+                "attempted_actions": [],
+                "artifacts": [],
+                "why_stopped": "success",
+                "recommended_owner": "parent",
+            })},
+        ])
+        tracker = SubagentLoopTracker()
+        result = _extract_result(state, tracker, WhyStopped.SUCCESS, goal="scan 10.0.0.1")
+        self.assertNotIn("auto-synthesized", result.summary)
+        self.assertIn("10.0.0.1", result.summary)
+
+    def test_goal_recap_backfilled_when_empty(self):
+        state = LoopState(messages=[
+            {"role": "assistant", "content": json.dumps({
+                "status": "partial",
+                "summary": "ran out of turns.",
+                "confidence": "low",
+                "key_findings": [],
+                "evidence": [],
+                "attempted_actions": [],
+                "artifacts": [],
+                "why_stopped": "budget_exhausted",
+                "recommended_owner": "parent",
+            })},
+        ])
+        tracker = SubagentLoopTracker()
+        result = _extract_result(state, tracker, WhyStopped.BUDGET_EXHAUSTED, goal="enumerate users via IDOR")
+        self.assertEqual(result.goal_recap, "enumerate users via IDOR")
+
+    def test_goal_recap_unchanged_when_provided(self):
+        state = LoopState(messages=[
+            {"role": "assistant", "content": json.dumps({
+                "status": "completed",
+                "goal_recap": "checked all user IDs 1-100",
+                "summary": "found 5 leaked profiles.",
+                "confidence": "high",
+                "key_findings": [],
+                "evidence": [],
+                "attempted_actions": [],
+                "artifacts": [],
+                "why_stopped": "success",
+                "recommended_owner": "parent",
+            })},
+        ])
+        tracker = SubagentLoopTracker()
+        result = _extract_result(state, tracker, WhyStopped.SUCCESS, goal="original goal text")
+        self.assertEqual(result.goal_recap, "checked all user IDs 1-100")
 
 
 class TestExtractPathsFromCommand(unittest.TestCase):

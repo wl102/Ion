@@ -129,6 +129,13 @@ class SubagentResult(BaseModel):
     """Structured result that a subagent must produce."""
 
     status: SubagentStatus = SubagentStatus.FAILED
+    goal_recap: str = Field(
+        default="",
+        description=(
+            "One-sentence restatement of the subtask goal as the subagent understood it. "
+            "Anchors the rest of the report and lets the parent verify alignment."
+        ),
+    )
     summary: str = ""
     confidence: Confidence = Confidence.LOW
     success_criteria_met: bool = False
@@ -148,34 +155,126 @@ class SubagentResult(BaseModel):
     def from_raw_output(cls, raw: str) -> "SubagentResult":
         """Best-effort parse of subagent free-text output into structured result.
 
-        Tries to find a JSON block first, then falls back to heuristics.
+        New contract (natural-language-first):
+          - The subagent's final message is primarily a natural-language summary.
+          - It may optionally embed a small JSON block with programmatic metadata
+            (status, confidence, success_criteria_met, etc.) at the end.
+          - This parser splits the text and JSON, using the text as ``summary``
+            and the JSON for the remaining structured fields.
+          - For backward compatibility, if the text part is empty but the JSON
+            contains summary/key_findings/etc., we still accept them.
         """
-        # 1. Try explicit JSON block
+        if not raw or not raw.strip():
+            return cls(
+                status=SubagentStatus.FAILED,
+                summary="No output produced.",
+                why_stopped=WhyStopped.NO_PROGRESS,
+                recommended_owner=RecommendedOwner.PARENT,
+            )
+
+        text_part = raw.strip()
+        parsed_meta: dict[str, Any] = {}
+
+        # 1. Explicit ```json block — text before it is the summary.
         if "```json" in raw:
-            json_part = raw.split("```json")[-1].split("```")[0].strip()
+            parts = raw.split("```json")
+            text_part = parts[0].strip()
+            json_part = parts[-1].split("```")[0].strip()
             try:
-                data = json.loads(json_part)
-                return cls.model_validate(data)
+                parsed_meta = json.loads(json_part)
             except Exception:
                 pass
+        else:
+            # 2. Bare JSON object at the very end of the text.
+            raw_stripped = raw.strip()
+            if raw_stripped.endswith("}"):
+                # Walk backwards to find the matching opening brace.
+                brace_depth = 0
+                start_idx = -1
+                for i in range(len(raw_stripped) - 1, -1, -1):
+                    ch = raw_stripped[i]
+                    if ch == "}":
+                        brace_depth += 1
+                    elif ch == "{":
+                        brace_depth -= 1
+                        if brace_depth == 0:
+                            start_idx = i
+                            break
+                if start_idx >= 0:
+                    candidate = raw_stripped[start_idx:]
+                    try:
+                        parsed_meta = json.loads(candidate)
+                        text_part = raw_stripped[:start_idx].strip()
+                    except Exception:
+                        pass
 
-        # 2. Try bare JSON object
-        raw_stripped = raw.strip()
-        if raw_stripped.startswith("{") and raw_stripped.endswith("}"):
+        # Build the base result from JSON metadata (backward compatible).
+        if isinstance(parsed_meta, dict) and parsed_meta:
             try:
-                data = json.loads(raw_stripped)
-                return cls.model_validate(data)
+                result = cls.model_validate(parsed_meta)
             except Exception:
-                pass
+                # Partial / malformed JSON — fall back to manual mapping.
+                result = cls()
+                if "status" in parsed_meta:
+                    try:
+                        result.status = SubagentStatus(parsed_meta["status"])
+                    except Exception:
+                        pass
+                if "goal_recap" in parsed_meta:
+                    result.goal_recap = str(parsed_meta["goal_recap"])[:500]
+                if "confidence" in parsed_meta:
+                    try:
+                        result.confidence = Confidence(parsed_meta["confidence"])
+                    except Exception:
+                        pass
+                if "success_criteria_met" in parsed_meta:
+                    result.success_criteria_met = bool(
+                        parsed_meta["success_criteria_met"]
+                    )
+                if "recommended_next_action" in parsed_meta:
+                    result.recommended_next_action = str(
+                        parsed_meta["recommended_next_action"]
+                    )[:500]
+                if "recommended_owner" in parsed_meta:
+                    try:
+                        result.recommended_owner = RecommendedOwner(
+                            parsed_meta["recommended_owner"]
+                        )
+                    except Exception:
+                        pass
+                if "next_agent" in parsed_meta:
+                    v = parsed_meta["next_agent"]
+                    result.next_agent = str(v)[:100] if v is not None else None
+                # Accept summary / key_findings / evidence / attempted_actions / artifacts
+                # from JSON only when there is no natural-language text.
+                if not text_part:
+                    result.summary = str(parsed_meta.get("summary", ""))[:3000]
+                if not result.key_findings and "key_findings" in parsed_meta:
+                    result.key_findings = list(parsed_meta["key_findings"])[:20]
+                if not result.evidence and "evidence" in parsed_meta:
+                    result.evidence = [
+                        EvidenceItem(**item)
+                        for item in parsed_meta["evidence"][:20]
+                    ]
+                if not result.attempted_actions and "attempted_actions" in parsed_meta:
+                    result.attempted_actions = [
+                        AttemptedAction(**item)
+                        for item in parsed_meta["attempted_actions"][:20]
+                    ]
+                if not result.artifacts and "artifacts" in parsed_meta:
+                    result.artifacts = [
+                        Artifact(**item) for item in parsed_meta["artifacts"][:15]
+                    ]
+        else:
+            result = cls()
 
-        # 3. Fallback: treat the whole thing as a plain-text summary
-        return cls(
-            status=SubagentStatus.PARTIAL,
-            summary=raw[:2000],
-            confidence=Confidence.LOW,
-            why_stopped=WhyStopped.NO_PROGRESS,
-            recommended_owner=RecommendedOwner.PARENT,
-        )
+        # Summary priority: natural-language text > JSON summary.
+        if text_part:
+            result.summary = text_part[:3000]
+
+        result.why_stopped = WhyStopped.NO_PROGRESS
+        result.recommended_owner = RecommendedOwner.PARENT
+        return result
 
 
 class SubagentRequest(BaseModel):

@@ -554,7 +554,7 @@ The following specialized sub-agents are available for delegation. Each has its 
 
 _SUBAGENT_PREFIX = """\
 ## Identity
-You are {agent_name}, a specialized sub-agent. You execute a single assigned task within a strict budget and return a **structured JSON result**. You do not have global context — rely only on the task goal and the parent context provided below."""
+You are {agent_name}, a specialized sub-agent. You execute a single assigned task within a strict budget and return a **Task Summary** to the parent agent. You do not have global context — rely only on the task goal and the parent context provided below."""
 
 _SUBAGENT_RULES = """\
 ## Rules
@@ -563,7 +563,7 @@ _SUBAGENT_RULES = """\
 - **Tool precision** — Use the minimum set of tools needed. Avoid redundant or exploratory actions.
 - **Evidence-based** — Ground every claim in observable tool output.
 - **Progress tracking** — After every tool call, ask yourself: "Did this produce new information?" If a turn produces no new evidence, no verified/negated hypothesis, no artifact, and no narrowed problem space, it is **no progress**.
-- **Stop early** — If you meet the success criteria, stop immediately and return the JSON result. Do not continue for "completeness". If you are blocked or have no progress for multiple turns, stop and report why.
+- **Stop early** — If you meet the success criteria, stop immediately and return the Task Summary. Do not continue for "completeness". If you are blocked or have no progress for multiple turns, stop and report why.
 - **No repetition** — Never repeat the same tool call with the same arguments. If a call fails, change parameters or approach before retrying.
 - **Self-assessment after every attempt** — After each tool call, explicitly classify the result in your reasoning:
   - `success` — Got useful data, confirmed a hypothesis, or made tangible progress.
@@ -571,25 +571,57 @@ _SUBAGENT_RULES = """\
   - `no_signal` — Response is empty, identical to prior attempts, or gives no actionable intelligence.
 - **Kill your darlings** — If your success rate drops below ~15% after 5+ attempts, **stop immediately** and return. Report what was tried, why it failed, and what the parent should try next. Do NOT keep retrying the same vector hoping for luck.
 - **Fail fast, report rich** — A quick failure with detailed findings is infinitely more valuable than burning the entire budget on one hopeless vector. Your parent agent can replan with new evidence.
-- **JSON output contract** — Your final message MUST be a single valid JSON object matching the schema below. No markdown fences, no extra text outside the JSON.
 
-## Output Schema (MUST be valid JSON)
+## Final Output Format (HARD REQUIREMENT)
+Your final message MUST have two parts, in this exact order:
+
+### 1. Task Summary (the main deliverable)
+Write 2-6 sentences of natural language that answer:
+- **What was the subtask?** (restate the goal in your own words)
+- **What did you try?** (which tools / approaches)
+- **What did you find?** (concrete observations: host up/down, ports open, response codes, file contents, errors, etc.)
+- **If blocked or failed** — WHY? (what error, what filter, what missing dependency)
+
+Quality standards:
+- Write in **past tense**, as a report, not a plan.
+- **NEVER** start with planning verbs ("首先", "接下来", "Let's", "I will", "Plan:", "Step 1").
+- **NEVER** end the summary with `:`, `：`, `?`, or `...`.
+- Name concrete values: IP addresses, port numbers, status codes, file paths, error messages.
+
+GOOD example (success):
+> Goal: verify host 192.168.2.17 is reachable and enumerate top TCP ports.
+> I ran a host-discovery ping sweep and a top-1000 TCP port scan with nmap.
+> The host is up. Open ports: 22/tcp (ssh), 80/tcp (http), 3389/tcp (rdp).
+> Port 443/tcp is filtered. No web server banner was returned on port 80.
+
+GOOD example (failure):
+> Goal: scan 192.168.2.17 for CVEs with nuclei.
+> I executed nuclei twice, targeting the vulnerabilities/ and cves/ template directories.
+> Both runs failed with the same error: "[FTL] Could not run nuclei: no templates provided for scan".
+> The nuclei-templates directory appears empty or not mounted. The parent should either mount templates or switch to nmap NSE scripts.
+
+BAD example (planning preamble, NOT a summary):
+> 首先进行存活检测和快速端口扫描：
+
+### 2. Structured Metadata (optional, appended at the end)
+After the summary, you MAY append a small JSON block with programmatic metadata the parent uses for branching logic. This JSON is secondary — the natural-language summary above is the authoritative report.
+
 ```json
 {
   "status": "completed|partial|blocked|failed|wrong_agent|needs_parent|budget_exhausted",
-  "summary": "One-sentence conclusion.",
+  "goal_recap": "One-sentence restatement of the subtask goal in your own words.",
   "confidence": "low|medium|high",
-  "success_criteria_met": true,
-  "key_findings": ["..."],
-  "evidence": [{"type": "tool_output|http_response|file|observation", "value": "...", "source": "..."}],
-  "attempted_actions": [{"action": "...", "result": "success|failed|no_signal", "why": "..."}],
-  "artifacts": [{"path": "...", "description": "..."}],
+  "success_criteria_met": true|false,
   "why_stopped": "success|blocked|no_progress|budget_exhausted|tool_limit|wrong_capability|low_success_rate|same_error_limit",
-  "recommended_next_action": "...",
+  "recommended_next_action": "What the parent should do next.",
   "recommended_owner": "parent|same_agent|other_agent",
   "next_agent": "optional"
 }
-```"""
+```
+
+**Do NOT** put `summary`, `key_findings`, `evidence`, `attempted_actions`, or `artifacts` inside this JSON — those are automatically extracted from your tool call history by the framework.
+
+If you are unsure about the JSON, skip it. The parent can read your natural-language summary perfectly well."""
 
 
 # =============================================================================

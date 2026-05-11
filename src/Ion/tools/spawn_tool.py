@@ -263,6 +263,7 @@ def _run_subagent(
             stop_conditions=req.stop_conditions,
             callbacks=parent_callbacks,
             verbose=verbose,
+            goal=req.goal,
         )
     except Exception as exc:
         sub_logger.log_subagent_finish(

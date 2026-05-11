@@ -746,6 +746,7 @@ def run_subagent_loop(
     stop_conditions: Optional[Any] = None,
     callbacks: Optional[dict[str, Any]] = None,
     verbose: bool = True,
+    goal: str = "",
 ) -> SubagentResult:
     """
     Run a controlled sub-agent loop with budget enforcement and anti-loop guards.
@@ -772,7 +773,7 @@ def run_subagent_loop(
                     client, model_id, state, tools, logger, agent_name,
                     callbacks=callbacks, verbose=verbose,
                 )
-                return _extract_result(state, tracker, WhyStopped.MAX_TURNS)
+                return _extract_result(state, tracker, WhyStopped.MAX_TURNS, goal=goal)
 
             # --- pre-turn context compression ---
             if state.context_max_tokens > 0:
@@ -832,7 +833,7 @@ def run_subagent_loop(
                     callbacks=callbacks, verbose=verbose,
                 )
                 why = _map_violation_to_why(budget_violation)
-                return _extract_result(state, tracker, why)
+                return _extract_result(state, tracker, why, goal=goal)
 
             # --- post-turn length handling ---
             if state.finish_reason == "length":
@@ -849,7 +850,7 @@ def run_subagent_loop(
                 # narrative half-thought.
                 tracker.status_transitions.append(f"natural:{state.finish_reason}")
                 last_text = _latest_assistant_content(state)
-                if not _looks_like_result_json(last_text):
+                if not _looks_like_task_summary(last_text):
                     _inject_termination_message(
                         state, f"natural_stop_without_json:{state.finish_reason}"
                     )
@@ -857,7 +858,7 @@ def run_subagent_loop(
                         client, model_id, state, tools, logger, agent_name,
                         callbacks=callbacks, verbose=verbose,
                     )
-                return _extract_result(state, tracker, WhyStopped.SUCCESS)
+                return _extract_result(state, tracker, WhyStopped.SUCCESS, goal=goal)
 
     except Exception as exc:
         tracker.status_transitions.append(f"error:{exc}")
@@ -873,27 +874,23 @@ def run_subagent_loop(
 
 
 def _inject_termination_message(state: LoopState, reason: str):
-    """Append a system message forcing the model to terminate with JSON."""
+    """Append a system message forcing the model to terminate with a Task Summary."""
     msg = (
         f"\n[SYSTEM] Execution halted: {reason}.\n"
-        "You must now output ONLY a single JSON object matching the schema:\n"
-        "{\n"
-        '  "status": "completed|partial|blocked|failed|wrong_agent|needs_parent|budget_exhausted",\n'
-        '  "summary": "<one-sentence conclusion>",\n'
-        '  "confidence": "low|medium|high",\n'
-        '  "success_criteria_met": true|false,\n'
-        '  "key_findings": ["<concrete finding from tool output>", ...],\n'
-        '  "evidence": [{"type": "tool_output", "value": "<snippet>", "source": "<tool>"}, ...],\n'
-        '  "attempted_actions": [{"action": "<tool+args>", "result": "success|failed|no_signal", "why": "<reason>"}, ...],\n'
-        '  "artifacts": [{"path": "<file path>", "description": "..."}, ...],\n'
-        '  "why_stopped": "success|blocked|no_progress|budget_exhausted|tool_limit|wrong_capability|low_success_rate|same_error_limit",\n'
-        '  "recommended_next_action": "...",\n'
-        '  "recommended_owner": "parent|same_agent|other_agent",\n'
-        '  "next_agent": null\n'
-        "}\n"
-        "Populate `key_findings`, `evidence`, and `attempted_actions` from the tool outputs you observed. "
-        "Empty arrays mean the parent will not know what you tried — fill them.\n"
-        "No markdown fences, no extra text outside the JSON object."
+        "You must now output your final Task Summary.\n\n"
+        "Write 2-6 sentences in natural language covering:\n"
+        "1. What was the subtask goal (restate it).\n"
+        "2. What tools or approaches did you try?\n"
+        "3. What did you find? Name concrete values: IPs, ports, status codes, file paths, errors.\n"
+        "4. If blocked or failed — WHY?\n\n"
+        "Rules:\n"
+        "- Write in past tense, as a report, NOT a plan.\n"
+        "- NEVER start with planning verbs (首先, 接下来, Let's, I will, Plan:, Step 1).\n"
+        "- NEVER end with ':', '：', '?', or '...'.\n"
+        "- After the summary, you MAY append a small JSON block with ONLY these fields:\n"
+        '  {"status": "...", "goal_recap": "...", "confidence": "...", "success_criteria_met": true|false, "why_stopped": "...", "recommended_next_action": "...", "recommended_owner": "parent|same_agent|other_agent"}\n'
+        "- Do NOT put summary, key_findings, evidence, attempted_actions, or artifacts inside the JSON.\n"
+        "- If you are unsure about the JSON, skip it. The summary alone is sufficient."
     )
     state.messages.append({"role": "system", "content": msg})
 
@@ -919,8 +916,110 @@ def _force_final_turn(
         pass
 
 
+def _summary_looks_unusable(text: str) -> bool:
+    """Detect summaries that are planning fragments rather than conclusions.
+
+    The parent agent only sees the JSON, so a useless ``summary`` field
+    silently degrades the whole delegation. This catches the most common
+    failure modes from small models:
+      - Too short to carry any conclusion.
+      - Ends with ``:``/``：``/``?``/``？``/``...`` (mid-thought).
+      - Starts with planning verbs and lacks concrete observations.
+    """
+    if not text:
+        return True
+    s = text.strip()
+    if not s:
+        return True
+    # Strip trailing punctuation/whitespace for the suffix check
+    suffix_marker = s.rstrip()
+    if suffix_marker.endswith((":", "：", "?", "？", "...", "…")):
+        return True
+    # Too terse to be a real conclusion
+    if len(s) < 20:
+        return True
+    # Planning starters: only flag when the sentence is short, because longer
+    # text often does include a conclusion after the planning verb.
+    planning_starters = (
+        "首先", "接下来", "下面", "我将", "我会", "让我", "计划",
+        "now i", "now let", "let's", "i'll", "i will", "i'm going",
+        "plan:", "step 1", "step1", "first,", "first ",
+    )
+    s_lower = s.lower()
+    if len(s) < 120 and any(s_lower.startswith(p) for p in planning_starters):
+        return True
+    return False
+
+
+def _build_fallback_summary(
+    goal: str,
+    success_criteria_met: bool,
+    why_stopped: WhyStopped,
+    key_findings: list[str],
+    attempted_actions: list,
+) -> str:
+    """Build a goal-aware summary when the subagent failed to produce one.
+
+    Surfaces what the parent actually needs:
+      - The goal (so the parent knows what was attempted).
+      - The verdict from ``why_stopped`` / ``success_criteria_met``.
+      - The top-most synthesized findings (already content-bearing thanks
+        to ``_pick_finding_snippet``).
+    """
+    goal_short = (goal or "").strip()
+    if len(goal_short) > 160:
+        goal_short = goal_short[:159] + "…"
+
+    if success_criteria_met:
+        verdict = "success criteria met"
+    elif why_stopped in (
+        WhyStopped.BLOCKED,
+        WhyStopped.NO_PROGRESS,
+        WhyStopped.SAME_ERROR_LIMIT,
+        WhyStopped.LOW_SUCCESS_RATE,
+        WhyStopped.STOP_CONDITION,
+        WhyStopped.WRONG_CAPABILITY,
+    ):
+        verdict = f"stopped ({why_stopped.value})"
+    elif why_stopped in (
+        WhyStopped.BUDGET_EXHAUSTED,
+        WhyStopped.TOOL_LIMIT,
+        WhyStopped.MAX_TURNS,
+    ):
+        verdict = f"budget exhausted ({why_stopped.value})"
+    else:
+        verdict = "no structured conclusion produced"
+
+    n_actions = len(attempted_actions or [])
+    findings_preview = ""
+    if key_findings:
+        head = key_findings[:2]
+        findings_preview = " | ".join(
+            f if len(f) <= 200 else f[:199] + "…" for f in head
+        )
+
+    # Distinguish "model produced JSON but a garbage summary" from
+    # "model didn't produce JSON at all" so the parent knows whether
+    # to trust the rest of the fields (goal_recap, status, etc.).
+    if key_findings and verdict == "no structured conclusion produced":
+        verdict = "subagent wrote structured JSON but an unusable summary"
+
+    parts = [
+        f"[auto-synthesized] goal: {goal_short or '(unspecified)'}",
+        f"verdict: {verdict}",
+        f"actions: {n_actions}",
+    ]
+    if findings_preview:
+        parts.append(f"top findings: {findings_preview}")
+    parts.append("see key_findings/attempted_actions for full content.")
+    return "; ".join(parts)
+
+
 def _extract_result(
-    state: LoopState, tracker: SubagentLoopTracker, why: WhyStopped
+    state: LoopState,
+    tracker: SubagentLoopTracker,
+    why: WhyStopped,
+    goal: str = "",
 ) -> SubagentResult:
     """Extract a SubagentResult from the loop state's final messages."""
     raw_output = ""
@@ -970,6 +1069,25 @@ def _extract_result(
     if not result.key_findings and synth["key_findings"]:
         result.key_findings = synth["key_findings"]
 
+    # --- Quality gate on the report text the parent actually reads ---
+    # goal_recap: if empty, anchor it on the goal we were given.
+    if not (result.goal_recap or "").strip() and goal:
+        recap = goal.strip()
+        if len(recap) > 200:
+            recap = recap[:199] + "…"
+        result.goal_recap = recap
+
+    # summary: replace narrative fragments / planning preambles with a
+    # goal-aware synthesized line so the parent gets actionable signal.
+    if _summary_looks_unusable(result.summary):
+        result.summary = _build_fallback_summary(
+            goal=goal,
+            success_criteria_met=result.success_criteria_met,
+            why_stopped=why,
+            key_findings=result.key_findings,
+            attempted_actions=result.attempted_actions,
+        )
+
     # If still failed but we have key findings, mark as partial
     if result.status == SubagentStatus.FAILED and result.key_findings:
         result.status = SubagentStatus.PARTIAL
@@ -994,21 +1112,46 @@ def _latest_assistant_content(state: LoopState) -> str:
     return ""
 
 
-def _looks_like_result_json(text: str) -> bool:
-    """Best-effort check that text contains a JSON object with a 'status' field."""
+def _looks_like_task_summary(text: str) -> bool:
+    """Best-effort check that the text is a substantive task summary.
+
+    With the natural-language-first contract the model may output:
+      - A few sentences of findings (GOOD)
+      - A short planning fragment like "首先进行...:" (BAD)
+      - A bare JSON object with metadata only (ACCEPTABLE — _extract_result will merge it)
+
+    We return True when the text is long enough and does NOT look like an
+    unfinished planning preamble.
+    """
     if not text:
         return False
-    candidate = text.strip()
-    # Strip ```json ... ``` fence if present
-    if "```json" in candidate:
-        candidate = candidate.split("```json", 1)[-1].split("```", 1)[0].strip()
-    if not (candidate.startswith("{") and candidate.endswith("}")):
+    s = text.strip()
+    if not s:
         return False
-    try:
-        data = json.loads(candidate)
-    except Exception:
+    # Very short → probably not a real summary yet.
+    if len(s) < 40:
         return False
-    return isinstance(data, dict) and "status" in data
+    # Planning starters that end mid-sentence are a red flag.
+    planning_starters = (
+        "首先", "接下来", "下面", "然后", "我将", "我会", "让我", "计划",
+        "now i", "now let", "let's", "i'll", "i will", "i'm going",
+        "plan:", "step 1", "step1", "first,", "first ",
+    )
+    s_lower = s.lower()
+    if len(s) < 120 and any(s_lower.startswith(p) for p in planning_starters):
+        return False
+    # If it ends with a colon/question mark it's mid-thought.
+    if s.rstrip().endswith((":", "：", "?", "？", "...", "…")):
+        return False
+    # A bare JSON object (with no natural language) is not a task summary.
+    stripped = s.strip()
+    if stripped.startswith("{") and stripped.endswith("}"):
+        try:
+            json.loads(stripped)
+            return False
+        except Exception:
+            pass
+    return True
 
 
 def _extract_paths_from_command(cmd: str) -> list[str]:
@@ -1086,6 +1229,129 @@ def _action_tag(tool_name: str, args_obj: dict | str | None) -> str:
             return tool_name
         return tool_name
     return tool_name
+
+
+def _pick_finding_snippet(raw: str, max_lines: int = 3, line_limit: int = 140) -> str:
+    """Pick a short, content-bearing preview from a tool result.
+
+    The goal is to give the parent agent enough signal to act without having
+    to re-run the tool, while staying compact. We:
+      - Drop empty lines and lines that are pure decoration (`===`, `---`).
+      - Drop lines that match obvious tool boot/footer noise (e.g., nmap's
+        "Starting Nmap ..." or "Nmap done").
+      - Skip label-only lines like ``Response Headers:`` (colon at end with
+        no content after it) because the actual data lives on the next line(s).
+      - For http_request-style output, prefer body content over header labels.
+      - Keep at most `max_lines` lines, each trimmed to `line_limit` chars.
+    """
+    if not raw or not isinstance(raw, str):
+        return ""
+
+    # Try JSON envelope first ({"output": "..."} / {"error": "..."}) so we
+    # quote the payload, not the wrapper.
+    body = raw.strip()
+    if body.startswith("{") and body.endswith("}"):
+        try:
+            obj = json.loads(body)
+        except Exception:
+            obj = None
+        if isinstance(obj, dict):
+            for key in ("output", "stdout", "result", "error", "message", "data"):
+                v = obj.get(key)
+                if isinstance(v, str) and v.strip():
+                    body = v
+                    break
+
+    lines = body.splitlines()
+
+    # Detect http_request format (starts with Status: / Final URL:).
+    # For these, the interesting content is usually after the last
+    # double-blank-line separator (body), not in the header labels.
+    is_http_output = False
+    if len(lines) >= 2:
+        is_http_output = (
+            lines[0].strip().startswith("Status:")
+            and any(l.strip().startswith("Final URL:") for l in lines[:5])
+        )
+
+    noise_patterns = (
+        r"^starting nmap",
+        r"^nmap done:",
+        r"^scanning .* \[",
+        r"^pre-scan script",
+        r"^[*=\-_]{3,}$",
+    )
+    noise_re = re.compile("|".join(noise_patterns), re.IGNORECASE)
+
+    def _is_label_only(text: str, next_line: str | None) -> bool:
+        """A line like ``Response Headers:`` is a label; the data follows."""
+        if not text.rstrip().endswith(":"):
+            return False
+        # If the next line is indented (continuation) or also short label,
+        # skip this one because the real info is on subsequent lines.
+        if next_line is not None:
+            nxt = next_line.strip()
+            if nxt and not nxt.endswith(":"):
+                # The next line has actual data → current line is a label.
+                return True
+        return False
+
+    # Build candidate list with optional http-aware reordering.
+    candidates: list[str] = []
+    if is_http_output:
+        # Phase 1: grab Status + Final URL (they anchor the finding).
+        for line in lines:
+            s = line.strip()
+            if s.startswith("Status:") or s.startswith("Final URL:"):
+                candidates.append(s)
+        # Phase 2: grab lines from the BODY (after the last blank line).
+        last_blank = -1
+        for i in range(len(lines) - 1, -1, -1):
+            if lines[i].strip() == "":
+                last_blank = i
+                break
+        if last_blank >= 0:
+            for line in lines[last_blank + 1 :]:
+                s = line.strip()
+                if s:
+                    candidates.append(s)
+    else:
+        for line in lines:
+            s = line.strip()
+            if s:
+                candidates.append(s)
+
+    picked: list[str] = []
+    for idx, s in enumerate(candidates):
+        if not s:
+            continue
+        if noise_re.search(s):
+            continue
+        # Skip label-only lines (e.g., "Response Headers:", "Cookies:")
+        nxt = candidates[idx + 1] if idx + 1 < len(candidates) else None
+        if _is_label_only(s, nxt):
+            continue
+        # ANSI escape stripping (best-effort, common shell output)
+        s = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", s).strip()
+        if not s:
+            continue
+        if len(s) > line_limit:
+            s = s[: line_limit - 1] + "…"
+        picked.append(s)
+        if len(picked) >= max_lines:
+            break
+
+    if not picked:
+        # Fallback: take the first non-empty stripped line, even if it looked noisy.
+        for line in lines:
+            s = line.strip()
+            if s:
+                if len(s) > line_limit:
+                    s = s[: line_limit - 1] + "…"
+                picked.append(s)
+                break
+
+    return " | ".join(picked)
 
 
 def _synthesize_from_messages(messages: list[dict]) -> dict[str, list]:
@@ -1209,21 +1475,27 @@ def _synthesize_from_messages(messages: list[dict]) -> dict[str, list]:
                         Artifact(path=path, description=f"output of {name}")
                     )
 
-        # Per-tool header note (NOT content). For shell-style tools, prefer
-        # the actual program name (`nmap`, `curl`, ...) over the wrapper name
-        # so multiple bash calls are distinguishable.
-        if raw_result:
+            # Per-tool header note + a short content snippet so the parent agent
+        # gets actionable signal, not just "tool X ran". For shell-style
+        # tools, prefer the actual program name (`nmap`, `curl`, ...) over
+        # the wrapper name so multiple bash calls are distinguishable.
+        if raw_result and name not in ("update_task", "create_task"):
             tag = _action_tag(name, args_obj)
-            key_findings.append(
-                f"[{tag}] {result_kind}, {len(raw_result)} chars of output"
-            )
+            snippet = _pick_finding_snippet(raw_result)
+            if snippet:
+                line = f"[{tag}] {result_kind} ({len(raw_result)} chars): {snippet}"
+            else:
+                line = f"[{tag}] {result_kind}, {len(raw_result)} chars of output"
+            # Deduplicate identical lines (e.g., same nuclei error twice).
+            if not key_findings or line != key_findings[-1]:
+                key_findings.append(line)
 
     return {
         "attempted_actions": attempted[-20:],
         # Evidence is the model's job; we never auto-fill it.
         "evidence": [],
         "artifacts": artifacts[-15:],
-        # Header notes only — one short line per tool call.
+        # Content-bearing snippets — filtered for signal, deduplicated.
         "key_findings": key_findings[-20:],
     }
 
