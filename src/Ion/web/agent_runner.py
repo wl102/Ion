@@ -315,10 +315,13 @@ class WebAgentRunner:
                         "payload": [t.model_dump() for t in tasks],
                     }
                 )
-            # Push recent tool log entries so frontend sees full execution details
-            log_entries = self._read_recent_tool_logs()
-            if log_entries:
-                put_event({"type": "tool_log", "payload": log_entries})
+            # Only push the full tool log summary when the agent actually stops
+            # (not after every intermediate tool-calls turn). This prevents the
+            # chat stream from being flooded with repetitive tool history.
+            if finish_reason != "tool_calls":
+                log_entries = self._read_recent_tool_logs()
+                if log_entries:
+                    put_event({"type": "tool_log", "payload": log_entries})
 
         return {
             "on_assistant_start": on_assistant_start,
