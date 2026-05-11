@@ -9,6 +9,12 @@ ENV PYTHONUNBUFFERED=1
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 ENV UV_PROJECT_ENVIRONMENT=/opt/ion/.venv
+ENV ION_PORT=8000
+
+# 替换 Kali 软件源为阿里云镜像（国内稳定）
+RUN sed -i 's/mirror.wane.kr/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+    sed -i 's/mirrors.neusoft.edu.cn/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+    sed -i 's/http.kali.org/mirrors.aliyun.com/g' /etc/apt/sources.list
 
 # Install base system dependencies, networking tools, and Playwright system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -38,7 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 \
     libpango-1.0-0 \
     libcairo2 \
-    libasound2 \
+    libasound2t64 \
     libatspi2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -51,8 +57,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Symlink dirb wordlists to the path expected by ffuf skill
-RUN mkdir -p /usr/share/wordlists/dirb \
-    && ln -sf /usr/share/dirb/wordlists/common.txt /usr/share/wordlists/dirb/common.txt
+# (skip if the wordlists package already provides this path on Kali)
+RUN if [ ! -e /usr/share/wordlists/dirb/common.txt ]; then \
+        mkdir -p /usr/share/wordlists/dirb \
+        && ln -sf /usr/share/dirb/wordlists/common.txt /usr/share/wordlists/dirb/common.txt; \
+    fi
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
@@ -93,7 +102,7 @@ RUN mkdir -p /opt/ion/data /opt/ion/logs
 COPY docker/docker-entrypoint.sh /opt/ion/docker-entrypoint.sh
 RUN chmod +x /opt/ion/docker-entrypoint.sh
 
-EXPOSE 8000
+EXPOSE ${ION_PORT}
 
 ENTRYPOINT ["/opt/ion/docker-entrypoint.sh"]
 CMD ["web"]

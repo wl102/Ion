@@ -6,10 +6,13 @@ services:
     image: ion:latest
     container_name: ion-agent
     ports:
-      - "${ION_PORT:-8000}:8000"
+      - "${ION_PORT:-8000}:${ION_PORT:-8000}"
     volumes:
       - ./data:/opt/ion/data
       - ./logs:/opt/ion/logs
+      # Persist the SQLite database next to docker-compose.yaml.
+      # Pre-create the file (`touch ion.db`) so Docker bind-mounts it as a file, not a directory.
+      - ./ion.db:/opt/ion/ion.db
     env_file:
       - .env
     # Uncomment for host networking (useful for pentest scans)

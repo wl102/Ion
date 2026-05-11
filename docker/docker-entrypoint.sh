@@ -9,8 +9,9 @@ shift || true
 
 case "${MODE}" in
     web)
-        echo "[+] Starting Ion Web API on 0.0.0.0:8000 ..."
-        exec uvicorn Ion.web.app:app --host 0.0.0.0 --port 8000 "$@"
+        PORT="${ION_PORT:-8000}"
+        echo "[+] Starting Ion Web API on 0.0.0.0:${PORT} ..."
+        exec uvicorn Ion.web.app:app --host 0.0.0.0 --port "${PORT}" "$@"
         ;;
     cli)
         echo "[+] Starting Ion CLI ..."

@@ -15,3 +15,6 @@ wheels/
 .ruff_cache
 .claude
 logs/
+
+# sqlite
+ion.db
