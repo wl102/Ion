@@ -12,7 +12,12 @@ from Ion.agents.registry import AgentRegistry
 from Ion.skills.registry import SkillRegistry
 from Ion.skills.tools import register_skill_tools
 from Ion.tools.registry import registry
-from Ion.tools.task_tool import TaskManager, register_task_tools
+from Ion.tools.task_tool import (
+    TaskManager,
+    register_task_tools,
+    set_current_task_manager,
+    reset_current_task_manager,
+)
 
 # Import remaining built-in tools so their side-effect registrations fire.
 import Ion.tools.shell  # noqa: F401
@@ -223,17 +228,26 @@ class IonAgent:
             callbacks = {}
         callbacks.setdefault("verbose", self.verbose)
 
-        run_agent_loop(
-            self.client,
-            self.model_id,
-            state,
-            self.tools,
-            self.logger,
-            on_before_turn=_on_before_turn,
-            callbacks=callbacks,
-            pause_check=pause_check,
-            verbose=self.verbose,
-        )
+        # Bind this agent's task_manager to the current execution context so
+        # that the globally-registered task tools (create_task, update_task,
+        # attack_graph_view, ...) dispatch to *this* session's DAG. Without
+        # this, sessions sharing the same process would silently overwrite
+        # each other's task handlers via the global tool registry.
+        tm_token = set_current_task_manager(self.task_manager)
+        try:
+            run_agent_loop(
+                self.client,
+                self.model_id,
+                state,
+                self.tools,
+                self.logger,
+                on_before_turn=_on_before_turn,
+                callbacks=callbacks,
+                pause_check=pause_check,
+                verbose=self.verbose,
+            )
+        finally:
+            reset_current_task_manager(tm_token)
 
         if self.logger:
             self.logger.log_conversation(state.messages)

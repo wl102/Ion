@@ -1,9 +1,16 @@
 """
 任务持久化：包括创建、更新、删除、总览工具，智能体随时查看当前进度
+
+Session 隔离：每个会话维护自己的 ``TaskManager``。`task` 类工具不再在注册期
+用闭包绑定具体的 ``TaskManager`` —— ``registry`` 是进程级单例，多 session
+场景下后创建的会话会覆盖先前会话注册的 handler，导致跨 session 的
+DAG 错乱。改为通过 :class:`ContextVar` 在调用时定位当前线程上下文的
+``TaskManager``，由 :class:`Ion.agent.IonAgent` 在 ``run()`` 入口设置。
 """
 
 import json
 import uuid
+from contextvars import ContextVar
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -205,13 +212,66 @@ task_manager = TaskManager()
 
 
 # ---------------------------------------------------------------------------
+# Per-session task_manager resolution
+# ---------------------------------------------------------------------------
+# ``register_task_tools`` is called once per ``IonAgent`` instance, and every
+# call re-registers the task handlers on the *global* tool registry. If we let
+# the handlers close over the ``task_manager`` argument, the last-registered
+# session silently hijacks every other session's task graph (the original
+# bug: session A's ``update_task`` returns session B's attack graph).
+#
+# The fix routes every task-tool dispatch through a ContextVar that
+# ``IonAgent.run`` binds for the duration of its execution. ``register_task_tools``
+# still accepts a ``task_manager`` parameter for backward compatibility, but
+# only uses it as a process-wide fallback for callers that never set the
+# ContextVar (e.g. single-session CLI runs).
+
+_current_task_manager_ctx: ContextVar[Optional["TaskManager"]] = ContextVar(
+    "_current_task_manager", default=None
+)
+_default_task_manager: Optional["TaskManager"] = None
+
+
+def set_current_task_manager(tm: "TaskManager"):
+    """Bind ``tm`` as the active task_manager for the current context.
+
+    Returns the ``contextvars.Token`` so the caller can ``reset_current_task_manager``
+    once the request finishes.
+    """
+    return _current_task_manager_ctx.set(tm)
+
+
+def reset_current_task_manager(token) -> None:
+    """Restore the previous task_manager binding for the current context."""
+    _current_task_manager_ctx.reset(token)
+
+
+def _resolve_task_manager() -> "TaskManager":
+    """Return the task_manager that handles the *current* dispatch.
+
+    Resolution order:
+      1. Per-context binding set by ``set_current_task_manager`` (web sessions).
+      2. Process-wide default from the most recent ``register_task_tools`` call
+         (CLI / legacy single-session usage).
+      3. Module-level singleton (last-resort fallback).
+    """
+    tm = _current_task_manager_ctx.get()
+    if tm is not None:
+        return tm
+    if _default_task_manager is not None:
+        return _default_task_manager
+    return task_manager
+
+
+# ---------------------------------------------------------------------------
 # Handler implementations
 # ---------------------------------------------------------------------------
 
 
 def _create_task(
-    task_manager, name, description, depend_on, on_failure, information_score, intelligence_source
+    name, description, depend_on, on_failure, information_score, intelligence_source
 ):
+    task_manager = _resolve_task_manager()
     if depend_on is None:
         depend_on = []
     elif isinstance(depend_on, str):
@@ -230,7 +290,8 @@ def _create_task(
     return tool_result(success=True, output=f"Task created: {task.id} - {task.name}")
 
 
-def _update_task(task_manager, task_id, status, result):
+def _update_task(task_id, status, result):
+    task_manager = _resolve_task_manager()
     try:
         st = TaskStatus(status.lower())
     except ValueError:
@@ -266,8 +327,9 @@ def _update_task(task_manager, task_id, status, result):
     return tool_result(success=True, output=output)
 
 
-def _reflect_on_task(task_manager, task_id):
+def _reflect_on_task(task_id):
     """Structured reflection on a completed or failed task to distill experience."""
+    task_manager = _resolve_task_manager()
     data = task_manager.get_task_reflection_data(task_id)
     if data is None:
         return tool_error(f"Task {task_id} not found")
@@ -282,43 +344,48 @@ def _reflect_on_task(task_manager, task_id):
         f"**Attempts:** {data['attempts']}",
     ]
 
-    if data['intelligence_source']:
+    if data["intelligence_source"]:
         lines.append(f"**Intelligence Source:** {data['intelligence_source']}")
 
-    notes = data.get('execution_notes', [])
+    notes = data.get("execution_notes", [])
     if notes:
         lines.append(f"\n### Execution Notes ({len(notes)})")
         for i, note in enumerate(notes, 1):
             lines.append(f"{i}. {note}")
 
-    findings = data.get('key_findings', [])
+    findings = data.get("key_findings", [])
     if findings:
         lines.append(f"\n### Key Findings ({len(findings)})")
         for i, finding in enumerate(findings, 1):
             lines.append(f"{i}. {finding}")
 
-    lines.extend([
-        "",
-        "### Reflection Prompts (answer these to decide if a skill is warranted)",
-        "1. What was the core challenge? Was it domain-specific or generalizable?",
-        "2. What approach ultimately worked? Can it be abstracted into a reusable workflow?",
-        "3. What failed approaches taught you something important?",
-        "4. Were there specific tool parameters, combinations, or sequences that mattered?",
-        "5. If you faced this exact scenario again, would a skill help?",
-        "",
-        "### Next Step",
-        "If this task contains reusable knowledge, use `skill_manage` (action=create) to save it. "
-        "If a similar skill already exists, use `skill_manage` (action=patch) to enrich it.",
-    ])
+    lines.extend(
+        [
+            "",
+            "### Reflection Prompts (answer these to decide if a skill is warranted)",
+            "1. What was the core challenge? Was it domain-specific or generalizable?",
+            "2. What approach ultimately worked? Can it be abstracted into a reusable workflow?",
+            "3. What failed approaches taught you something important?",
+            "4. Were there specific tool parameters, combinations, or sequences that mattered?",
+            "5. If you faced this exact scenario again, would a skill help?",
+            "",
+            "### Next Step",
+            "If this task contains reusable knowledge, use `skill_manage` (action=create) to save it. "
+            "If a similar skill already exists, use `skill_manage` (action=patch) to enrich it.",
+        ]
+    )
 
     return tool_result(success=True, output="\n".join(lines))
 
 
-def _add_task_note(task_manager, task_id, note, finding):
+def _add_task_note(task_id, note, finding):
     """Append an execution note or key finding to a running task."""
     if not note and not finding:
         return tool_error("Either 'note' or 'finding' must be provided")
-    updated = task_manager.add_task_note(task_id, note=note or "", finding=finding or "")
+    task_manager = _resolve_task_manager()
+    updated = task_manager.add_task_note(
+        task_id, note=note or "", finding=finding or ""
+    )
     if updated is None:
         return tool_error(f"Task {task_id} not found")
     parts = []
@@ -332,7 +399,8 @@ def _add_task_note(task_manager, task_id, note, finding):
     )
 
 
-def _delete_task(task_manager, task_id):
+def _delete_task(task_id):
+    task_manager = _resolve_task_manager()
     ok = task_manager.delete_task(task_id)
     return tool_result(
         success=ok,
@@ -340,14 +408,17 @@ def _delete_task(task_manager, task_id):
     )
 
 
-def _list_tasks(task_manager):
+def _list_tasks():
+    task_manager = _resolve_task_manager()
     tasks = task_manager.list_tasks()
     if not tasks:
         return tool_result(success=True, output="No tasks yet.")
     lines = []
     for t in tasks:
         deps = ", ".join(t.depend_on) if t.depend_on else "none"
-        score_info = f" [info_score: {t.information_score}]" if t.information_score > 0 else ""
+        score_info = (
+            f" [info_score: {t.information_score}]" if t.information_score > 0 else ""
+        )
         intel_info = f" ← {t.intelligence_source[:60]}" if t.intelligence_source else ""
         lines.append(
             f"{t.id}: [{t.status.value}] {t.name}{score_info} (deps: {deps}){intel_info}"
@@ -355,7 +426,8 @@ def _list_tasks(task_manager):
     return tool_result(success=True, output="\n".join(lines))
 
 
-def _attack_graph_view(task_manager):
+def _attack_graph_view():
+    task_manager = _resolve_task_manager()
     result = task_manager.attack_graph_view()
     return tool_result(success=True, output=result)
 
@@ -365,17 +437,31 @@ def _attack_graph_view(task_manager):
 # ---------------------------------------------------------------------------
 
 
-def register_task_tools(task_manager):
-    """Register task tools with a custom task manager instance."""
+def register_task_tools(task_manager=None):
+    """Register the task tools on the global registry.
+
+    The handlers do *not* close over ``task_manager``. They resolve the active
+    task_manager at dispatch time via :func:`_resolve_task_manager`, which
+    consults the per-request ContextVar set by :class:`IonAgent.run`. The
+    optional ``task_manager`` argument is kept as a process-wide fallback for
+    legacy single-session callers that never bind the ContextVar.
+    """
+    if task_manager is not None:
+        global _default_task_manager
+        _default_task_manager = task_manager
+
     registry.register(
         name="create_task",
         toolset="task",
         schema=CREATE_TASK_SCHEMA,
-        handler=lambda name, description, depend_on=None, on_failure="replan",
-        information_score=None, intelligence_source=None, **kw: (
+        handler=lambda name, description, depend_on=None, on_failure="replan", information_score=None, intelligence_source=None, **kw: (
             _create_task(
-                task_manager, name, description, depend_on, on_failure,
-                information_score, intelligence_source
+                name,
+                description,
+                depend_on,
+                on_failure,
+                information_score,
+                intelligence_source,
             )
         ),
         description="Register a task in the execution graph.",
@@ -387,7 +473,7 @@ def register_task_tools(task_manager):
         toolset="task",
         schema=UPDATE_TASK_SCHEMA,
         handler=lambda task_id, status, result=None, **kw: _update_task(
-            task_manager, task_id, status, result
+            task_id, status, result
         ),
         description="Update a task's status and optionally its result.",
         emoji="📝",
@@ -397,7 +483,7 @@ def register_task_tools(task_manager):
         name="delete_task",
         toolset="task",
         schema=DELETE_TASK_SCHEMA,
-        handler=lambda task_id, **kw: _delete_task(task_manager, task_id),
+        handler=lambda task_id, **kw: _delete_task(task_id),
         description="Delete a task from the execution graph.",
         emoji="🗑️",
     )
@@ -406,7 +492,7 @@ def register_task_tools(task_manager):
         name="list_tasks",
         toolset="task",
         schema=LIST_TASKS_SCHEMA,
-        handler=lambda **kw: _list_tasks(task_manager),
+        handler=lambda **kw: _list_tasks(),
         description="List all tasks in the execution graph.",
         emoji="📜",
     )
@@ -415,7 +501,7 @@ def register_task_tools(task_manager):
         name="attack_graph_view",
         toolset="task",
         schema=ATTACK_GRAPH_VIEW_SCHEMA,
-        handler=lambda **kw: _attack_graph_view(task_manager),
+        handler=lambda **kw: _attack_graph_view(),
         description="View the execution graph as a tree structure.",
         emoji="🌳",
     )
@@ -424,7 +510,7 @@ def register_task_tools(task_manager):
         name="reflect_on_task",
         toolset="task",
         schema=REFLECT_ON_TASK_SCHEMA,
-        handler=lambda task_id, **kw: _reflect_on_task(task_manager, task_id),
+        handler=lambda task_id, **kw: _reflect_on_task(task_id),
         description="Reflect on a completed/failed task to decide if experience should be saved as a skill.",
         emoji="🧠",
     )
@@ -434,7 +520,7 @@ def register_task_tools(task_manager):
         toolset="task",
         schema=ADD_TASK_NOTE_SCHEMA,
         handler=lambda task_id, note="", finding="", **kw: _add_task_note(
-            task_manager, task_id, note, finding
+            task_id, note, finding
         ),
         description="Record execution notes and key findings while a task is running.",
         emoji="📝",
@@ -483,7 +569,7 @@ UPDATE_TASK_SCHEMA = {
     "type": "function",
     "function": {
         "name": "update_task",
-        "description": "Update a task's status and optionally its result. CRITICAL: You MUST call this after every task execution to synchronize graph state. Prose completion is NOT sufficient — the task graph is the single source of truth. Call `update_task(task_id, status=\"running\")` before starting work, and `update_task(task_id, status=\"completed\", result=...) ` immediately upon success/failure.",
+        "description": 'Update a task\'s status and optionally its result. CRITICAL: You MUST call this after every task execution to synchronize graph state. Prose completion is NOT sufficient — the task graph is the single source of truth. Call `update_task(task_id, status="running")` before starting work, and `update_task(task_id, status="completed", result=...) ` immediately upon success/failure.',
         "parameters": {
             "type": "object",
             "properties": {
@@ -592,6 +678,7 @@ ADD_TASK_NOTE_SCHEMA = {
 # Persistent TaskManager backed by SQLAlchemy
 # ---------------------------------------------------------------------------
 
+
 class PersistentTaskManager(TaskManager):
     """TaskManager that syncs every mutation to a database."""
 
@@ -604,11 +691,13 @@ class PersistentTaskManager(TaskManager):
     def _get_db(self):
         if self._db is None:
             from Ion.db import get_default_db
+
             self._db = get_default_db()
         return self._db
 
     def _sync_task(self, task: Task):
         from Ion.db.models import TaskRecord
+
         db = self._get_db()
         with next(db.get_session()) as sess:
             existing = sess.query(TaskRecord).filter_by(id=task.id).first()
@@ -647,6 +736,7 @@ class PersistentTaskManager(TaskManager):
 
     def _delete_from_db(self, task_id: str):
         from Ion.db.models import TaskRecord
+
         db = self._get_db()
         with next(db.get_session()) as sess:
             record = sess.query(TaskRecord).filter_by(id=task_id).first()
@@ -687,6 +777,7 @@ class PersistentTaskManager(TaskManager):
     def load_from_db(self):
         """Load tasks from database into memory."""
         from Ion.db.models import TaskRecord
+
         db = self._get_db()
         with next(db.get_session()) as sess:
             records = sess.query(TaskRecord).filter_by(session_id=self.session_id).all()
@@ -704,7 +795,9 @@ class PersistentTaskManager(TaskManager):
                     max_attempts=r.max_attempts,
                     information_score=r.information_score,
                     intelligence_source=r.intelligence_source,
-                    execution_notes=json.loads(r.execution_notes) if r.execution_notes else [],
+                    execution_notes=json.loads(r.execution_notes)
+                    if r.execution_notes
+                    else [],
                     key_findings=json.loads(r.key_findings) if r.key_findings else [],
                 )
                 self._tasks[task.id] = task
