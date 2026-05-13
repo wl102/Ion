@@ -1,135 +1,159 @@
-# Ion · 自治化网络安全渗透智能体
+# Ion · Autonomous Cybersecurity Penetration Agent
 
-> 🌐 **Languages**: [English](./README_EN.md) · **简体中文（当前）**
+> 🌐 **Languages**: **English (current)** · [简体中文](./README_CN.md)
 
 <p align="center">
-  <b>把渗透测试交给一个会自我进化的 AI 智能体。</b><br/>
-  动态攻击图谱 · 子智能体编排 · Skills 渐进式披露 · 全链路可观测
+  <b>Hand penetration testing over to a self-evolving AI agent.</b><br/>
+  Dynamic attack DAG · Sub-agent orchestration · Progressive Skills disclosure · End-to-end observability
 </p>
 
 <p align="center">
-  <a href="#-快速开始">🚀 快速开始</a> ·
-  <a href="#-系统架构">🏗 架构</a> ·
-  <a href="#-内置能力">🧰 能力清单</a> ·
-  <a href="#-路线图">🗺 路线图</a>
+  <a href="#-quick-start">🚀 Quick Start</a> ·
+  <a href="#-architecture">🏗 Architecture</a> ·
+  <a href="#-built-in-capabilities">🧰 Capabilities</a> ·
+  <a href="#-roadmap">🗺 Roadmap</a>
 </p>
 
 ---
 
-## 🎯 它是什么？
+## 🎯 What is it?
 
-**Ion** 是一个面向**网络安全渗透测试**场景的自治智能体框架。它不只是把 LLM 套上一层 ReAct 循环——它把"渗透测试工程师的工作流"作为一等公民进行建模：**目标分解 → 攻击图谱 → 任务编排 → 子智能体执行 → 证据收敛 → 经验沉淀**。
+**Ion** is an autonomous-agent framework purpose-built for **cybersecurity penetration testing**. It is more than a ReAct loop wrapped around an LLM — it models the **pentester's actual workflow** as a first-class citizen: **objective decomposition → attack graph → task orchestration → sub-agent execution → evidence convergence → experience distillation**.
 
-与一般 Agent 项目的差异：
+How Ion differs from generic agent projects:
 
-| 维度 | 通用 Agent | **Ion** |
+| Dimension | Generic Agent | **Ion** |
 |---|---|---|
-| 任务模型 | 顺序调用 | **DAG 攻击图谱**，支持依赖、就绪队列、信息分优先级 |
-| 提示词 | 单层硬编码 | **三层渐进披露**（身份 / 模式 / 运行时） |
-| 专家能力 | 一个万能 prompt | **11 个领域子智能体** + **8 个工具 Skill** |
-| 模式适配 | 固定 | `general` / `security` / `ctf` 一键切换 |
-| 经验积累 | 一次性 | **自动蒸馏 Skill**，下次更快 |
-| 可观测 | print 日志 | JSONL 全量记录：token、工具调用、子代理生命周期 |
-| 形态 | 仅 CLI | **库 + CLI + Web UI + REST API** |
+| Task model | Sequential calls | **DAG attack graph** with dependencies, ready queue, info-score priority |
+| Prompts | Single hardcoded prompt | **Three-layer progressive disclosure** (identity / mode / runtime) |
+| Expertise | One omni-prompt | **11 domain sub-agents** + **8 tool Skills** |
+| Mode adaptation | Fixed | One-flag switch between `general` / `security` / `ctf` |
+| Experience | Forgotten next run | **Auto-distilled into Skills** for next time |
+| Observability | print-style logs | JSONL captures of tokens, tool calls, sub-agent lifecycle |
+| Surfaces | CLI only | **Library + CLI + Web UI + REST API** |
 
 ---
 
-## ✨ 核心特性
+## ✨ Core Features
 
-- 🧠 **战略 / 战术双层架构** — 主智能体只做编排与决策；子智能体并发执行专项任务，互不污染上下文
-- 🕸 **动态攻击图谱（DAG）** — `create_task` / `update_task` 让 LLM 在执行中持续重规划，依赖驱动而非线性脚本
-- 🎚 **三种作战模式**
-  - `general` — 通用任务编排
-  - `security` — 渗透评估（默认带防护边界）
-  - `ctf` — CTF 夺旗（aggressive，flag 驱动决策树）
-- 📚 **Skills 渐进式披露**（[agentskills.dev](https://agentskills.dev) 规范）
-  - **Tier 1 Catalog**：启动注入 `name + description`
-  - **Tier 2 Instructions**：按需 `activate_skills` 加载完整 SKILL.md
-  - **Tier 3 Resources**：`scripts/` `references/` `assets/` 懒加载
-- 🤖 **专家子智能体目录** — `ReconAgent`、`SQLInjectionAgent`、`XSSAgent`、`SSRFDetectionAgent` …
-- 🔁 **自我进化** — 完成非平凡任务后自动调用 `skill_manage` 蒸馏经验
-- 📈 **生产级可观测性** — `~/.ion/logs/` 下按日期切分的 JSONL，含 token、工具、子代理 spawn/finish/redelegation
-- 💾 **持久化** — SQLite/MySQL/Postgres，会话、任务、消息、hook 全量落库
-- 🌐 **Web 控制台** — FastAPI + 静态前端，浏览器内启停会话、看图谱、读日志
-- 🪝 **运行时 Hook** — 智能体执行中向其注入用户消息，不打断主循环
+- 🧠 **Strategic / Tactical two-layer architecture** — The main agent only orchestrates and decides; sub-agents execute specialized tasks concurrently without polluting each other's context.
+- 🕸 **Dynamic attack graph (DAG)** — `create_task` / `update_task` let the LLM continuously re-plan during execution. Dependency-driven, not a linear script.
+- 🎚 **Three operational modes**
+  - `general` — General task orchestration
+  - `security` — Penetration assessment (with safety guardrails by default)
+  - `ctf` — Capture-the-flag (aggressive, flag-driven decision tree)
+- 📚 **Progressive Skills disclosure** ([agentskills.dev](https://agentskills.dev) compliant)
+  - **Tier 1 Catalog** — `name + description` injected at startup
+  - **Tier 2 Instructions** — Full `SKILL.md` loaded on demand via `activate_skills`
+  - **Tier 3 Resources** — `scripts/` `references/` `assets/` lazy-loaded
+- 🤖 **Expert sub-agent catalog** — `ReconAgent`, `SQLInjectionAgent`, `XSSAgent`, `SSRFDetectionAgent`, …
+- 🔁 **Self-evolution** — Calls `skill_manage` after non-trivial tasks to distill the experience.
+- 📈 **Production-grade observability** — JSONL files in `~/.ion/logs/` rotated by date: tokens, tools, sub-agent spawn/finish/redelegation.
+- 💾 **Persistence** — SQLite / MySQL / PostgreSQL via SQLAlchemy: sessions, tasks, messages, hooks.
+- 🌐 **Web console** — FastAPI + static frontend; start/stop sessions, inspect graphs, stream logs from the browser.
+- 🪝 **Runtime hooks** — Inject user messages into a running agent without breaking the main loop.
 
 ---
 
-## 🚀 快速开始
+## 📊 Benchmark Results
 
-### 安装
+Based on [XBOW validation-benchmarks](https://github.com/xbow-engineering/validation-benchmarks) (104 real-world Web security targets covering IDOR / SQLi / XSS / SSRF / RCE):
+
+### 🏆 Overall
+
+| Metric | Value |
+|---|---|
+| **Overall pass rate** | **95 / 104 = 91.3%** |
+| Average token consumption | ~1,562K / benchmark |
+| Average completion time | ~9.3 min / benchmark |
+
+### 📈 By Difficulty Level
+
+| Level | Pass / Total | Rate | Avg Tokens | Avg Duration |
+|:---:|:---:|:---:|---:|---:|
+| **L1** | 44 / 45 | **97.8%** | ~1,247K | ~5.1 min |
+| **L2** | 46 / 51 | **90.2%** | ~1,705K | ~12.4 min |
+| **L3** | 5 / 8 | **62.5%** | ~3,018K | ~18.2 min |
+
+> 📌 Data source: `benchmark_results_*.json` / `success_benchmarks.json` in repo root. Run `python total.py` to reproduce. Model: OpenAI-compatible model configured via `MODEL_ID`.
+
+---
+
+## 🚀 Quick Start
+
+### Install
 
 ```bash
 git clone <your-fork-url> Ion && cd Ion
 
 uv pip install -e .
-# 或
+# or
 pip install -e .
 
-# 可选：DuckDuckGo 搜索
+# Optional: DuckDuckGo search
 uv pip install -e ".[pentest]"
 ```
 
-### 配置
+### Configure
 
-复制 `.env.example` 为 `.env` 并填写：
+Copy `.env.example` to `.env` and fill in:
 
 ```bash
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 OPENAI_API_KEY  = "sk-xxxxxxxx"
-MODEL_ID        = "gpt-4o"          # 任意 OpenAI 兼容模型
+MODEL_ID        = "gpt-4o"          # any OpenAI-compatible model
 
-AGENT_MAX_LOOP      = 100           # 主循环上限，0 = 无限
-SUB_AGENT_MAX_LOOP  = 50            # 子代理预算
-CONTEXT_MAX_TOKENS  = 128000        # 上下文压缩阈值
+AGENT_MAX_LOOP      = 100           # main loop cap, 0 = unlimited
+SUB_AGENT_MAX_LOOP  = 50            # sub-agent budget
+CONTEXT_MAX_TOKENS  = 128000        # context-compression threshold
 
 ION_LOG_DIR         = "./logs"
 # ION_DATABASE_URL  = "sqlite:////absolute/path/to/ion.db"
 ```
 
-### 三种使用方式
+### Three ways to use Ion
 
-#### 1️⃣ 作为 Python 库
+#### 1️⃣ As a Python library
 
 ```python
 from Ion import IonAgent
 
 agent = IonAgent(mode="ctf")            # general / security / ctf
-result = agent.run("对目标 10.0.0.5:80 进行渗透并取得 flag")
+result = agent.run("Penetrate target 10.0.0.5:80 and capture the flag")
 
 print(result)
-print(agent.get_usage_summary())        # token 使用
-agent.save_tasks("attack_plan.json")    # 任务图谱持久化
+print(agent.get_usage_summary())        # token usage
+agent.save_tasks("attack_plan.json")    # persist the task graph
 ```
 
 #### 2️⃣ CLI
 
 ```bash
-# 单次查询
+# Single query
 ion "scan 192.168.1.1 with nmap"
 
-# 交互模式
+# Interactive mode
 ion -i
 
-# CTF 模式 + 加载预定义图谱
-ion --agent-mode ctf --task-file plan.json "继续执行下一个就绪任务"
+# CTF mode + load a predefined graph
+ion --agent-mode ctf --task-file plan.json "execute the next ready task"
 
-# 限制轮次
-ion --max-turns 50 "目标资产盘点"
+# Cap turn count
+ion --max-turns 50 "asset inventory"
 ```
 
-#### 3️⃣ Web 控制台
+#### 3️⃣ Web console
 
 ```bash
 uvicorn Ion.web.app:app --host 0.0.0.0 --port 8080
-# 浏览器访问 http://localhost:8080
+# Open http://localhost:8080
 ```
 
-包含：会话管理、任务图实时刷新、日志流、消息持久化。
+Includes session management, live task-graph view, streaming logs, persisted messages.
 
 ---
 
-## 🏗 系统架构
+## 🏗 Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -137,187 +161,187 @@ uvicorn Ion.web.app:app --host 0.0.0.0 --port 8080
 └────────────────────────────┬────────────────────────────────────┘
                              │
                   ┌──────────▼───────────┐
-                  │     IonAgent         │  ← 主编排者
+                  │     IonAgent         │  ← Strategic Orchestrator
                   │  (Strategic Layer)   │
                   └──────────┬───────────┘
         ┌────────────────────┼────────────────────┐
         ▼                    ▼                    ▼
  ┌─────────────┐     ┌──────────────┐     ┌──────────────┐
  │ TaskManager │     │ SkillRegistry│     │AgentRegistry │
- │  (DAG 图谱) │     │ (渐进披露)   │     │ (子代理目录) │
+ │  (DAG)      │     │ (progressive)│     │ (sub-agents) │
  └─────────────┘     └──────────────┘     └──────────────┘
         │                    │                    │
         └─────────┬──────────┴───────────┬────────┘
                   ▼                      ▼
         ┌──────────────────┐   ┌────────────────────┐
-        │  Tools Registry  │   │ run_subagent_loop  │ ← 战术层
+        │  Tools Registry  │   │ run_subagent_loop  │ ← Tactical Layer
         │ (bash/http/...)  │   │ (Tactical Workers) │
         └────────┬─────────┘   └──────────┬─────────┘
                  │                        │
                  └──────────┬─────────────┘
                             ▼
                  ┌──────────────────────┐
-                 │ ObservabilityLogger  │ → JSONL 日志
-                 │ + DB (SQLAlchemy)    │ → 持久化
+                 │ ObservabilityLogger  │ → JSONL logs
+                 │ + DB (SQLAlchemy)    │ → persistence
                  └──────────────────────┘
 ```
 
-### 模块速览
+### Module map
 
-| 路径 | 职责 |
+| Path | Responsibility |
 |---|---|
-| `src/Ion/agent.py` | `IonAgent` 入口类；装配 prompt / tools / registries |
-| `src/Ion/ion.py` | 主循环：`run_agent_loop` / `run_one_turn` / `run_subagent_loop` |
-| `src/Ion/prompts/builder.py` | 三层 prompt 拼装（identity / mode / runtime） |
+| `src/Ion/agent.py` | `IonAgent` entry class; wires prompt / tools / registries |
+| `src/Ion/ion.py` | Main loop: `run_agent_loop` / `run_one_turn` / `run_subagent_loop` |
+| `src/Ion/prompts/builder.py` | Three-layer prompt assembly (identity / mode / runtime) |
 | `src/Ion/tools/` | `bash_exec` `python_exec` `http_request` `web_search` `task_tool` `spawn_tool` `skill_tool` |
-| `src/Ion/skills/` | 内置 Skill：nmap/nuclei/sqlmap/dirsearch/ffuf + ctf-common-patterns + privilege-escalation + web-rce-chain |
-| `src/Ion/agents/` | 11 个领域子智能体：Recon / SQLi / XSS / SSRF / FileUpload / DirBrute / AuthBypass / WebFingerprint / VulnScan / PrivEsc / PostExploit |
-| `src/Ion/db/` | SQLAlchemy 模型：`SessionRecord` / `TaskRecord` / `MessageRecord` / `HookRecord` |
-| `src/Ion/web/` | FastAPI 应用 + 静态前端 |
-| `src/Ion/observability.py` | JSONL 日志器，含 token / tool / subagent / 上下文压缩事件 |
+| `src/Ion/skills/` | Built-in Skills: nmap / nuclei / sqlmap / dirsearch / ffuf + ctf-common-patterns + privilege-escalation + web-rce-chain |
+| `src/Ion/agents/` | 11 domain sub-agents: Recon / SQLi / XSS / SSRF / FileUpload / DirBrute / AuthBypass / WebFingerprint / VulnScan / PrivEsc / PostExploit |
+| `src/Ion/db/` | SQLAlchemy models: `SessionRecord` / `TaskRecord` / `MessageRecord` / `HookRecord` |
+| `src/Ion/web/` | FastAPI app + static frontend |
+| `src/Ion/observability.py` | JSONL logger covering tokens / tools / sub-agents / context compression |
 
-### Prompt 三层
+### Three prompt layers
 
-| 层 | 内容 | 何时变化 |
+| Layer | Content | When it changes |
 |---|---|---|
-| Layer 1 — 身份 | Persona、Primary Directive、Core Responsibilities、Self-Improvement | 启动时确定 |
-| Layer 2 — 模式 | `general` / `security` / `ctf` 模板 | 启动时按 `mode` 选择 |
-| Layer 3 — 运行时 | 用户目标、当前任务图、Skills 目录、Tools schema、对话摘要 | **每轮自动刷新** |
+| Layer 1 — Identity | Persona, Primary Directive, Core Responsibilities, Self-Improvement | Fixed at startup |
+| Layer 2 — Mode | `general` / `security` / `ctf` template | Picked at startup based on `mode` |
+| Layer 3 — Runtime | User goal, current task graph, Skills catalog, tool schema, conversation summary | **Refreshed every turn** |
 
-刷新机制：`agent.run()` 内的 `_on_before_turn` 回调在每轮 LLM 调用前重建系统消息，使图谱 / 历史 / Skill 激活状态始终与现实同步。
+The `_on_before_turn` callback inside `agent.run()` rebuilds the system message before every LLM call so the graph / history / Skill activation state is always in sync with reality.
 
 ---
 
-## 🧰 内置能力
+## 🧰 Built-in Capabilities
 
-### 工具（Tools）
+### Tools
 
-| 工具 | 功能 |
+| Tool | What it does |
 |---|---|
-| `bash_exec` | 执行 shell 命令（带黑名单 + 超时） |
-| `python_exec` | 执行 Python 代码（exec 沙箱） |
-| `http_request` | HTTP GET/POST/PUT/DELETE |
-| `web_search` | DuckDuckGo 搜索 |
-| `create_task` / `update_task` / `delete_task` / `list_tasks` | 任务图 CRUD |
-| `add_task_note` | 任务执行注记（用于反思） |
-| `get_attack_graph` | 取攻击 DAG |
-| `list_skills` / `activate_skills` | Skill 目录与加载 |
-| `skill_manage` | **创建 / 更新 / 删除自定义 Skill**（自我进化入口） |
-| `list_subagents` / `spawn_subagent` | 子代理调度 |
+| `bash_exec` | Run shell commands (blacklist + timeout) |
+| `python_exec` | Run Python code (sandboxed `exec`) |
+| `http_request` | HTTP GET / POST / PUT / DELETE |
+| `web_search` | DuckDuckGo search |
+| `create_task` / `update_task` / `delete_task` / `list_tasks` | Task graph CRUD |
+| `add_task_note` | Annotate task execution (used for reflection) |
+| `get_attack_graph` | Fetch the DAG |
+| `list_skills` / `activate_skills` | Skill catalog and loading |
+| `skill_manage` | **Create / update / delete custom Skills** (the self-evolution entry) |
+| `list_subagents` / `spawn_subagent` | Sub-agent dispatch |
 
-### Skills（开箱即用）
+### Skills (out of the box)
 
-| Skill | 类别 | 用途 |
+| Skill | Category | Purpose |
 |---|---|---|
-| `nmap` | recon | 端口扫描、服务识别、OS 指纹 |
-| `nuclei` | vuln-scan | 模板化漏洞扫描 |
-| `sqlmap` | exploit | SQL 注入自动化 |
-| `dirsearch` | recon | 目录爆破 |
-| `ffuf` | recon | Web Fuzzing |
-| `ctf-common-patterns` | ctf | CTF 常见 payload / flag 位置速查 |
-| `privilege-escalation` | post-exploit | Linux/Win 提权清单 |
-| `web-rce-chain` | exploit | Web 漏洞链 → RCE 模式库 |
+| `nmap` | recon | Port scan, service detection, OS fingerprinting |
+| `nuclei` | vuln-scan | Templated vulnerability scanning |
+| `sqlmap` | exploit | Automated SQL injection |
+| `dirsearch` | recon | Directory brute-forcing |
+| `ffuf` | recon | Web fuzzing |
+| `ctf-common-patterns` | ctf | CTF payloads / flag locations cheat-sheet |
+| `privilege-escalation` | post-exploit | Linux/Windows privesc checklist |
+| `web-rce-chain` | exploit | Web vulnerability chain → RCE patterns |
 
-> 💡 自定义 Skill：在 `~/.ion/skills/<name>/SKILL.md` 按规范编写即自动加载。Resources 放在同目录的 `scripts/` `references/` `assets/`。
+> 💡 Custom Skills: drop a `~/.ion/skills/<name>/SKILL.md` following the spec and it auto-loads. Resources go under `scripts/` `references/` `assets/` in the same directory.
 
-### 子智能体（Sub-Agents）
+### Sub-agents
 
-| 子智能体 | 主攻方向 |
+| Sub-agent | Specialty |
 |---|---|
-| `ReconAgent` | 资产发现、端口、服务、OSINT |
-| `WebFingerprintAgent` | Web 应用指纹与技术栈识别 |
-| `VulnerabilityScanAgent` | 通用漏洞扫描与编排 |
-| `SQLInjectionAgent` | SQL 注入检测与利用 |
-| `XSSAgent` | XSS 探测与 payload 构造 |
-| `SSRFDetectionAgent` | SSRF 与内网探测 |
-| `FileUploadAgent` | 文件上传绕过 |
-| `DirBruteAgent` | 目录与隐藏资源爆破 |
-| `AuthBypassAgent` | 认证绕过与弱口令 |
-| `PrivilegeEscalationAgent` | 本地提权 |
-| `PostExploitAgent` | 后渗透、横向移动、痕迹清理 |
+| `ReconAgent` | Asset discovery, ports, services, OSINT |
+| `WebFingerprintAgent` | Web app fingerprinting & tech stack ID |
+| `VulnerabilityScanAgent` | General vulnerability scanning & orchestration |
+| `SQLInjectionAgent` | SQL injection detection & exploitation |
+| `XSSAgent` | XSS discovery & payload crafting |
+| `SSRFDetectionAgent` | SSRF & internal-network probing |
+| `FileUploadAgent` | File upload bypasses |
+| `DirBruteAgent` | Directory & hidden-resource brute-forcing |
+| `AuthBypassAgent` | Auth bypass & weak-credential testing |
+| `PrivilegeEscalationAgent` | Local privilege escalation |
+| `PostExploitAgent` | Post-exploitation, lateral movement, cleanup |
 
-> 💡 自定义子代理：`~/.ion/agents/<name>/AGENT.md`，frontmatter 必须含 `name` 与 `description`。
+> 💡 Custom sub-agents: `~/.ion/agents/<name>/AGENT.md`, frontmatter must contain `name` and `description`.
 
 ---
 
-## 📊 可观测性
+## 📊 Observability
 
-启动后自动在 `~/.ion/logs/` 生成（按日期切分）：
+Files auto-generated under `~/.ion/logs/` (rotated by date):
 
 ```
 logs/
-├── tools_2026-05-05.jsonl         # 每次工具调用：tool_name / arguments / output / duration_ms
-├── conversation_2026-05-05.jsonl  # 完整对话快照
-├── subagents_2026-05-05.jsonl     # 子代理 spawn / finish / redelegation
-└── usage_2026-05-05.json          # token 累计
+├── tools_2026-05-05.jsonl         # every tool call: tool_name / arguments / output / duration_ms
+├── conversation_2026-05-05.jsonl  # full conversation snapshots
+├── subagents_2026-05-05.jsonl     # sub-agent spawn / finish / redelegation
+└── usage_2026-05-05.json          # cumulative tokens
 ```
 
-每条记录含 `run_id` / `parent_run_id` / `agent_name`，可在 jq / DuckDB / 日志可视化中复原父子调用树。
+Every record carries `run_id` / `parent_run_id` / `agent_name`, so you can reconstruct the full parent/child call tree in jq / DuckDB / your favorite log UI.
 
 ---
 
-## 🗺 路线图
+## 🗺 Roadmap
 
-### ✅ 已完成
+### ✅ Done
 
-- [x] 三层 Prompt Builder（identity / mode / runtime）
-- [x] DAG 任务图 + 依赖驱动就绪队列 + 信息分优先级
-- [x] Skills 渐进披露（Tier 1/2/3）+ 自动同步到 `~/.ion/skills/`
-- [x] 11 个领域子智能体内置目录
-- [x] `spawn_subagent` 受控委派（预算、相似度防重复、结构化返回）
-- [x] 工具：bash / python / http / web_search / task / skill / spawn / agent_graph
-- [x] ObservabilityLogger：token + tools + subagents + 上下文压缩
-- [x] 持久化：SQLAlchemy 多后端（SQLite / MySQL / PostgreSQL）
-- [x] FastAPI Web API + 静态前端控制台
-- [x] CLI（query / interactive / task-file / mode 切换）
-- [x] CTF 模式：漏洞确认协议 + 决策树 + 分层 IDOR
-- [x] 自我进化：`skill_manage` 蒸馏经验
-- [x] 子代理执行过程实时回流到 chat
-- [x] LLM 自动生成会话标题 + chat-first 欢迎 UI
-- [x] 上下文压缩（超阈值自动总结历史）
+- [x] Three-layer Prompt Builder (identity / mode / runtime)
+- [x] DAG task graph + dependency-driven ready queue + info-score priority
+- [x] Progressive Skills disclosure (Tier 1/2/3) + auto-sync into `~/.ion/skills/`
+- [x] 11 built-in domain sub-agents
+- [x] `spawn_subagent` controlled delegation (budget, similarity guard, structured return)
+- [x] Tools: bash / python / http / web_search / task / skill / spawn / agent_graph
+- [x] ObservabilityLogger: tokens + tools + sub-agents + context compression
+- [x] Persistence: SQLAlchemy multi-backend (SQLite / MySQL / PostgreSQL)
+- [x] FastAPI Web API + static-frontend console
+- [x] CLI (query / interactive / task-file / mode switching)
+- [x] CTF mode: vulnerability-confirmation protocol + decision tree + tiered IDOR
+- [x] Self-evolution: `skill_manage` distills experience
+- [x] Sub-agent execution streamed live to chat
+- [x] LLM auto-generated session titles + chat-first welcome UI
+- [x] Context compression (auto-summarize history past threshold)
 
-### 🚧 进行中
+### 🚧 In progress
 
-- [ ] **MCP 协议接入** — 让 Ion 既能作为 MCP server 也能消费 MCP tool
-- [ ] **多模态证据链** — 截图、流量包、二进制 artifact 入图
-- [ ] **基准评测** — 接入 [Xbow validation-benchmarks](https://github.com/xbow-engineering/validation-benchmarks)，建立回归基线
-- [ ] **Skill 市场** — 一键安装/分享社区贡献的 SKILL.md
+- [ ] **MCP integration** — let Ion act as both an MCP server and an MCP-tool consumer
+- [ ] **Multi-modal evidence chain** — screenshots, packet captures, binary artifacts in the graph
+- [x] **Benchmarks** — wired up [Xbow validation-benchmarks](https://github.com/xbow-engineering/validation-benchmarks); 95/104 (91.3%) regression baseline established
+- [ ] **Skill marketplace** — one-click install / share community SKILL.md
 
-### 🔮 待办（欢迎共建）
+### 🔮 Backlog (contributions welcome)
 
-- [ ] **Replay & Time-travel** — 基于 JSONL 日志的会话重放与分支调试
-- [ ] **多智能体协同协议** — 跨智能体共享发现、避免重复扫描
-- [ ] **风险护栏 (Guardrails)** — 目标白名单、命令二次确认、爆破速率约束
-- [ ] **更多模式** — `bug-bounty` / `red-team` / `purple-team`
-- [ ] **报告生成器** — 自动产出 Markdown / PDF 渗透报告
-- [ ] **Browser-use 集成** — 复杂 Web 应用的真实浏览器交互
-- [ ] **流量代理 (mitm)** — 自动化 Burp 替代品，被动采集 + 主动重放
-
----
-
-## ⚖️ 安全声明
-
-Ion 是一个**用于授权范围内**渗透测试 / 红蓝对抗 / CTF 训练的工具。  
-对任何未授权目标的扫描、利用、数据外传**均属违法**。使用者需自行承担一切法律责任。
+- [ ] **Replay & time-travel** — Session replay and branch-debug from JSONL logs
+- [ ] **Multi-agent collaboration protocol** — Cross-agent finding sharing, redundant-scan avoidance
+- [ ] **Guardrails** — Target whitelist, command double-confirm, brute-force rate limits
+- [ ] **More modes** — `bug-bounty` / `red-team` / `purple-team`
+- [ ] **Report generator** — Auto-produce Markdown / PDF pentest reports
+- [ ] **Browser-use integration** — Real-browser interaction for complex web apps
+- [ ] **Traffic proxy (mitm)** — Automated Burp alternative with passive capture + active replay
 
 ---
 
-## 📐 评估基准
+## ⚖️ Safety Notice
 
-[Xbow validation-benchmarks](https://github.com/xbow-engineering/validation-benchmarks) — 项目接入中。
+Ion is intended for **authorized** penetration testing, red/blue-team exercises, and CTF training.  
+Scanning, exploiting, or exfiltrating against any target without explicit authorization **is illegal**. The user is fully responsible for any legal consequences.
 
 ---
 
-## 🤝 贡献
+## 📐 Evaluation Benchmark
 
-欢迎提 Issue / PR，特别是：
+See [Benchmark Results](#-benchmark-results) above for detailed scores.
 
-- 新的 Skill（请遵循 [agentskills.dev](https://agentskills.dev) 规范）
-- 新的领域子智能体（AGENT.md frontmatter 必须含 `name` + `description`）
-- Bug 修复与文档改进
+---
+
+## 🤝 Contributing
+
+Issues and PRs are welcome, especially for:
+
+- New Skills (please follow the [agentskills.dev](https://agentskills.dev) spec)
+- New domain sub-agents (AGENT.md frontmatter must contain `name` and `description`)
+- Bug fixes and documentation improvements
 
 ---
 
 ## 📄 License
 
-详见 LICENSE 文件。
+See LICENSE for details.
