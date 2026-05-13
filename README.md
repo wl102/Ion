@@ -111,6 +111,25 @@ ION_LOG_DIR         = "./logs"
 # ION_DATABASE_URL  = "sqlite:////absolute/path/to/ion.db"
 ```
 
+### Docker (Recommended)
+
+The fastest way to run Ion is with Docker Compose:
+
+```bash
+# Pre-create the SQLite file so Docker bind-mounts it as a file, not a directory
+touch ion.db
+
+# Build and start the web console
+docker compose up --build
+```
+
+Then open `http://localhost:8000`.  
+The compose file mounts `./data`, `./logs`, and `./ion.db` for persistence. To run CLI or library mode inside the container:
+
+```bash
+docker compose run --rm ion ion "scan 192.168.1.1 with nmap"
+```
+
 ### Three ways to use Ion
 
 #### 1️⃣ As a Python library

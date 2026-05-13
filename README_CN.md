@@ -111,6 +111,25 @@ ION_LOG_DIR         = "./logs"
 # ION_DATABASE_URL  = "sqlite:////absolute/path/to/ion.db"
 ```
 
+### Docker（推荐）
+
+最快上手方式是 Docker Compose：
+
+```bash
+# 预创建 SQLite 文件，避免 Docker 将其挂载为目录
+touch ion.db
+
+# 构建并启动 Web 控制台
+docker compose up --build
+```
+
+浏览器访问 `http://localhost:8000`。  
+Compose 已挂载 `./data`、`./logs` 和 `./ion.db` 用于持久化。如需在容器内运行 CLI：
+
+```bash
+docker compose run --rm ion ion "scan 192.168.1.1 with nmap"
+```
+
 ### 三种使用方式
 
 #### 1️⃣ 作为 Python 库
