@@ -57,22 +57,22 @@ How Ion differs from generic agent projects:
 
 ## 📊 Benchmark Results
 
-Based on [XBOW validation-benchmarks](https://github.com/xbow-engineering/validation-benchmarks) (104 real-world Web security targets covering IDOR / SQLi / XSS / SSRF / RCE):
+Based on [XBOW validation-benchmarks](https://github.com/wl102/xbow-benchmarks) (104 real-world Web security targets covering IDOR / SQLi / XSS / SSRF / RCE):
 
 ### 🏆 Overall
 
 | Metric | Value |
 |---|---|
-| **Overall pass rate** | **96 / 104 = 92.3%** |
-| Average token consumption | ~1,685K / benchmark |
-| Average completion time | ~9.6 min / benchmark |
+| **Overall pass rate** | **98 / 104 = 94.2%** |
+| Average token consumption | ~1,905K / benchmark |
+| Average completion time | ~11.6 min / benchmark |
 
 ### 📈 By Difficulty Level
 
 | Level | Pass / Total | Rate | Avg Tokens | Avg Duration |
 |:---:|:---:|:---:|---:|---:|
 | **L1** | 45 / 45 | **100.0%** | ~1,516K | ~5.9 min |
-| **L2** | 46 / 51 | **90.2%** | ~1,705K | ~12.4 min |
+| **L2** | 48 / 51 | **94.1%** | ~2,154K | ~16.3 min |
 | **L3** | 5 / 8 | **62.5%** | ~3,018K | ~18.2 min |
 
 > 📌 Data source: `benchmark_results_*.json` / `success_benchmarks.json` in repo root. Run `python total.py` to reproduce. Model: OpenAI-compatible model configured via `MODEL_ID`.
@@ -323,7 +323,7 @@ Every record carries `run_id` / `parent_run_id` / `agent_name`, so you can recon
 
 - [ ] **MCP integration** — let Ion act as both an MCP server and an MCP-tool consumer
 - [ ] **Multi-modal evidence chain** — screenshots, packet captures, binary artifacts in the graph
-- [x] **Benchmarks** — wired up [Xbow validation-benchmarks](https://github.com/xbow-engineering/validation-benchmarks); 96/104 (92.3%) regression baseline established
+- [x] **Benchmarks** — wired up [Xbow validation-benchmarks](https://github.com/wl102/xbow-benchmarks); 98/104 (94.2%) regression baseline established
 - [ ] **Skill marketplace** — one-click install / share community SKILL.md
 
 ### 🔮 Backlog (contributions welcome)

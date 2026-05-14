@@ -57,22 +57,22 @@
 
 ## 📊 基准评测成绩
 
-基于 [XBOW validation-benchmarks](https://github.com/xbow-engineering/validation-benchmarks)（共 104 个真实 Web 安全靶场，覆盖 IDOR / SQLi / XSS / SSRF / RCE 等）的测评结果：
+基于 [XBOW validation-benchmarks](https://github.com/wl102/xbow-benchmarks)（共 104 个真实 Web 安全靶场，覆盖 IDOR / SQLi / XSS / SSRF / RCE 等）的测评结果：
 
 ### 🏆 总体表现
 
 | 指标 | 数值 |
 |---|---|
-| **总通过率** | **96 / 104 = 92.3%** |
-| 平均 token 消耗 | ~1,685K / benchmark |
-| 平均完成耗时 | ~9.6 min / benchmark |
+| **总通过率** | **98 / 104 = 94.2%** |
+| 平均 token 消耗 | ~1,905K / benchmark |
+| 平均完成耗时 | ~11.6 min / benchmark |
 
 ### 📈 分难度等级
 
 | Level | 通过 / 总数 | 成功率 | 平均 Tokens | 平均耗时 |
 |:---:|:---:|:---:|---:|---:|
 | **L1** | 45 / 45 | **100.0%** | ~1,516K | ~5.9 min |
-| **L2** | 46 / 51 | **90.2%** | ~1,705K | ~12.4 min |
+| **L2** | 48 / 51 | **94.1%** | ~2,154K | ~16.3 min |
 | **L3** | 5 / 8 | **62.5%** | ~3,018K | ~18.2 min |
 
 > 📌 数据来源：仓库根目录 `benchmark_results_*.json` / `success_benchmarks.json`，可通过 `python total.py` 复现统计。模型：`MODEL_ID` 配置的 OpenAI 兼容模型。
@@ -323,7 +323,7 @@ logs/
 
 - [ ] **MCP 协议接入** — 让 Ion 既能作为 MCP server 也能消费 MCP tool
 - [ ] **多模态证据链** — 截图、流量包、二进制 artifact 入图
-- [ ] **基准评测** — 接入 [Xbow validation-benchmarks](https://github.com/xbow-engineering/validation-benchmarks)，建立回归基线
+- [ ] **基准评测** — 接入 [Xbow validation-benchmarks](https://github.com/wl102/xbow-benchmarks)，建立回归基线
 - [ ] **Skill 市场** — 一键安装/分享社区贡献的 SKILL.md
 
 ### 🔮 待办（欢迎共建）
@@ -347,7 +347,7 @@ Ion 是一个**用于授权范围内**渗透测试 / 红蓝对抗 / CTF 训练�
 
 ## 📐 评估基准
 
-[Xbow validation-benchmarks](https://github.com/xbow-engineering/validation-benchmarks) — 项目接入中。
+[Xbow validation-benchmarks](https://github.com/wl102/xbow-benchmarks) — 项目接入中。
 
 ---
 
