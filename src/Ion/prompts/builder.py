@@ -220,13 +220,17 @@ _DOMAIN_KNOWLEDGE_SECURITY = """\
    - **Multi-parameter IDOR**: If an endpoint has multiple ID parameters (e.g., `/order/{order_id}/receipt` while logged in as user_id=X), fuzz ALL of them, including the implicit user context in the session cookie.
 6. **Deserialization** — PHP `unserialize()` POP chains, Python `pickle.loads()`, Java gadget chains.
 7. **SSTI** — Engine-specific probes, sandbox escape via module import/reflection.
+8. **HTTP Request Smuggling (Desync)** — Exploits front-end/back-end parsing disagreement on `Content-Length` vs `Transfer-Encoding`. Variants: CL.TE, TE.CL, TE.TE (obfuscated). Common in CTF proxy chains. **Activate `http-request-smuggling` skill before testing.**
+9. **Race Conditions** — Time-of-check to time-of-use (TOCTOU) in state-dependent operations (balance checks, coupon usage, inventory). Exploit with high-concurrency burst requests. **Activate `race-condition` skill before testing.**
 
 ### Exploit Chaining
 - **Info Leak + File Read** — Get source → Audit source → Find RCE or sensitive info.
 - **File Upload + LFI** — Upload shell → LFI include → RCE.
 - **SSRF + Internal Services** — Access internal API → Trigger other vulnerabilities.
 - **SQLi + File Write** — Database access → Write webshell via `INTO OUTFILE`.
-- **Hardcoded Credentials + IDOR** — Find credentials in JS/source → Login → Enumerate ID-based endpoints → Fuzz IDs for unauthorized access."""
+- **Hardcoded Credentials + IDOR** — Find credentials in JS/source → Login → Enumerate ID-based endpoints → Fuzz IDs for unauthorized access.
+- **HTTP Desync + Internal Admin** — Smuggle request past WAF → Access `/admin` or `/flag` on back-end → Unauthorized data access.
+- **Race Condition + State Bypass** — Concurrent burst on coupon/transfer/vote endpoint → State inconsistency → Multiple uses of one-time resource."""
 
 _DOMAIN_KNOWLEDGE_CTF = """\
 ### CTF-Specific Optimizations
@@ -269,7 +273,10 @@ _DOMAIN_KNOWLEDGE_CTF = """\
   - Environment variables leaked in build artifacts
   - GraphQL schema introspection results
   - **Always** fetch and grep `/js/`, `/static/`, `/assets/`, `main.*.js`, `app.*.js` for `password`, `token`, `secret`, `apiKey`, `test`, `admin`.
-- **Pivot on intelligence, not time** — The moment you gain actionable intelligence, replan your task graph to prioritize exploitation of that intelligence before doing anything else."""
+- **Pivot on intelligence, not time** — The moment you gain actionable intelligence, replan your task graph to prioritize exploitation of that intelligence before doing anything else.
+- **Proxy architecture awareness** — If response headers reveal a reverse proxy (Nginx, Apache, Cloudflare, CDN), immediately consider HTTP Request Smuggling. CTFs with proxy layers often hide the flag behind desync attacks. Activate `http-request-smuggling` skill.
+- **State-dependent operation awareness** — Any endpoint modifying a counter, balance, coupon, or inventory is a race condition candidate. Before manual deep analysis, fire 20–50 concurrent requests to test for TOCTOU. Activate `race-condition` skill.
+- **Blind injection = automation first** — Confirmed blind SQLi / NoSQLi / command injection MUST be handled with automation (sqlmap, custom Python scripts) before any manual character-by-character extraction. Manual blind extraction burns >7M tokens per task. Activate `blind-injection-automation` skill."""
 
 _EXPLOIT_CONFIRMATION_PROTOCOL = """\
 ### Exploitation Confirmation Protocol (MANDATORY)
@@ -323,6 +330,12 @@ To prevent token waste on dead-end vectors:
 4. **IDOR Negative Abort**: If ALL layers (±500 step=1, ±3000 step=10, ±10000 step=100) + small-int scan on an endpoint return 100% identical responses → no IDOR on that parameter. Move to next parameter. Do NOT create additional IDOR tasks for the same parameter.
 5. **Brute-Force Abort**: Any brute-force (secret, password, ID) MUST have a success rate >15% after 5 attempts OR a hard time limit of 30s. If neither is met → abort and report "brute-force infeasible".
 6. **Single-Tool Retry Limit**: Do not retry the same tool with the same category of parameters more than 2 times. Switch tool or pivot.
+7. **Blind Injection Token Budget Abort**: Blind injection (time-based or boolean-based) is the #1 token consumer. Rules:
+   - If sqlmap or equivalent automation is available, **MUST use it within the first 3 turns** after confirmation. Manual character extraction is prohibited beyond 10 characters.
+   - Set a hard budget: max 10 minutes or 1M tokens for automated extraction. If exceeded → abort, report injection point confirmed but extraction budget exhausted.
+   - If neither sqlmap nor custom scripting is feasible, abort after confirming the injection type and report "exploitable but requires external tooling".
+8. **HTTP Desync Abort**: If no time delay or differential response is observed after testing CL.TE, TE.CL, and 3 TE.TE obfuscations → no desync on that endpoint. Do NOT continue testing additional obfuscations beyond 5 variants total.
+9. **Race Condition Abort**: If 100 concurrent requests on a state-dependent endpoint never produce anomalous state after 3 rounds → race condition unlikely. Document and pivot.
 
 ### Subtask Completion Judgment
 Use these criteria to decide WHEN a task is done:
@@ -465,6 +478,12 @@ _TOOL_GUIDELINES = """\
 - **XSS verification (HTTP → Browser two-tier)** — `http_request` can only detect **reflection** (the payload string appears raw in the response). It CANNOT prove JavaScript execution, DOM insertion, or dialog triggering. After ANY suspected XSS finding (reflected, stored, or DOM-based), you MUST call `browser_execute` with `hook_xss_sinks=true` to confirm real browser execution. A confirmed XSS requires non-empty `xss_sinks` or triggered `dialogs` (`alert`/`confirm`/`prompt`) in the `browser_execute` result. **Declaring XSS without `browser_execute` evidence is a false-positive violation.**
 - **Probing & enumeration** — Prefer `python_exec` over external scanners (`dirsearch`, `ffuf`, `gobuster`). Python scripts are reliable, portable, and give you full control over wordlists, rate limits, and output parsing. External tools often have missing dependencies or incompatible versions in the execution environment.
 - **Shell operations** — Use `bash` for one-off commands (nmap, file listings). Use `python_exec` for anything requiring state, loops, or data processing.
+- **Blind injection automation** — When blind injection (time-based or boolean-based) is confirmed, **immediately delegate to automation**:
+  - `sqlmap` (if available) with `--batch --threads=10 --technique=BT --time-sec=2`
+  - Custom `python_exec` async script with binary search for non-standard vectors
+  - **NEVER** manually extract >10 characters. Token cost scales linearly with characters; automation reduces cost by 10–20×.
+- **HTTP Desync detection** — Use `python_exec` with raw socket `send()`/`recv()` to craft split `Content-Length`/`Transfer-Encoding` payloads. Do NOT rely on `http_request` (it normalizes headers). Activate `http-request-smuggling` skill for payload templates.
+- **Race condition testing** — Use `python_exec` with `asyncio` + `aiohttp` to fire 20–100 concurrent requests. Do NOT test races sequentially. Activate `race-condition` skill for templates.
 
 ### Tool Failure Handling
 - If a tool call fails with an error, **analyze the error before retrying**. Common failure modes:
@@ -760,6 +779,82 @@ class PromptBuilder:
         parts.append(_OUTPUT_FORMAT)
 
         return "\n\n".join(parts)
+
+    # ------------------------------------------------------------------ #
+    #  Prefix-cache friendly builders                                    #
+    # ------------------------------------------------------------------ #
+
+    def build_static_system_prompt(
+        self, subagent_catalog: Optional[str] = None
+    ) -> str:
+        """
+        Build the STATIC portion of the system prompt (Layers 1-4 + 6).
+        This should be computed once per session and never modified,
+        so that prefix caching can reuse its KV cache across turns.
+        """
+        cfg = self.prompt_config
+        domain = cfg.get("domain", "general")
+        mode = cfg.get("agent_mode", "default")
+
+        parts: list[str] = []
+
+        # Section 1: Core Identity
+        parts.append(_PERSONA)
+        parts.append(_PRIMARY_DIRECTIVE)
+        parts.append(_CORE_RESPONSIBILITIES)
+        parts.append(_TASK_FIRST_MANDATE)
+        parts.append(_TASK_STATE_MANDATE)
+        parts.append(_SELF_IMPROVEMENT)
+
+        # Section 2: Operational Mode
+        if mode and mode != "default":
+            parts.append(_MODE_HINT.format(mode=mode))
+
+        # Section 3: Operational Doctrine
+        if cfg.get("include_domain_knowledge", True):
+            if domain == "security":
+                parts.append(_DOMAIN_KNOWLEDGE_SECURITY)
+                if mode == "ctf":
+                    parts.append(_DOMAIN_KNOWLEDGE_CTF)
+                    parts.append(_EXPLOIT_CONFIRMATION_PROTOCOL)
+                elif mode == "pentest":
+                    parts.append(_DOMAIN_KNOWLEDGE_PENTEST)
+            else:
+                parts.append(_DOMAIN_KNOWLEDGE_GENERAL)
+
+        if cfg.get("include_execution_principles", True):
+            parts.append(_EXECUTION_PRINCIPLES_BASE)
+            if mode == "aggressive":
+                parts.append(_EXECUTION_PRINCIPLES_AGGRESSIVE)
+            elif mode == "stealthy":
+                parts.append(_EXECUTION_PRINCIPLES_STEALTHY)
+
+        if cfg.get("include_task_path_planning", True):
+            parts.append(_TASK_PATH_PLANNING_BASE)
+            if domain == "security" and mode == "ctf":
+                parts.append(_TASK_PATH_PLANNING_CTF)
+
+        if cfg.get("include_tool_guidelines", True):
+            parts.append(_TOOL_GUIDELINES)
+
+        # Section 4: Delegation & Sub-Agents
+        if subagent_catalog:
+            parts.append(_SUBAGENT_DELEGATION)
+            parts.append(_AGENT_MD_HEADER)
+            parts.append(subagent_catalog)
+
+        # Section 6: Output Standards
+        parts.append(_OUTPUT_FORMAT)
+
+        return "\n\n".join(parts)
+
+    def build_dynamic_context(self, runtime_context: dict[str, Any]) -> str:
+        """
+        Build the DYNAMIC portion of the system prompt (Layer 5: Mission Context).
+        This changes every turn and should be injected as a trailing message,
+        so the stable prefix (static system prompt) remains cacheable.
+        """
+        return self._build_runtime_block(runtime_context)
 
     # ------------------------------------------------------------------ #
     #  Runtime block assembler                                          #
@@ -1109,8 +1204,9 @@ class PromptBuilder:
         if tools_schema is not None:
             ctx.update(cls.build_tools_context(tools_schema))
 
-        if messages is not None:
-            ctx.update(cls.build_execution_history(messages))
+        # NOTE: execution_history removed. Conversation history is already in
+        # the messages list; duplicating it in the system prompt wastes tokens
+        # and breaks prefix caching by mutating the system prompt every turn.
 
         # Remove None values so downstream helpers stay clean
         return {k: v for k, v in ctx.items() if v is not None}
