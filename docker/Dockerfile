@@ -79,7 +79,12 @@ RUN uv sync --frozen --no-dev
 ENV PATH="/opt/ion/.venv/bin:$PATH"
 
 # Ensure pip is available in the venv so bash tools can run `pip install`
-RUN uv pip install pip dirsearch
+RUN uv pip install pip
+
+# Install dirsearch
+RUN wget -q "https://github.com/maurosoria/dirsearch/releases/download/v0.4.4/dirsearch-nuitka-linux-amd64-async" -O /tmp/dirsearch \
+    && mv /tmp/dirsearch /usr/local/bin/dirsearch \
+    && chmod +x /usr/local/bin/dirsearch
 
 # Install Playwright Chromium browser binaries
 RUN playwright install chromium
