@@ -145,6 +145,10 @@ These notes become the raw material for `reflect_on_task` when the task complete
 ### Proactive Skill Activation
 When planning tasks, check `list_skills` first. If a relevant skill exists, `activate_skills` before executing. Do not rediscover knowledge you have already saved."""
 
+_LANGUAGE_REQUIREMENT = """\
+## Language Requirement
+Always respond in the same language as the user's query. If the user asks in Chinese, reply in Chinese. If the user asks in English, reply in English. Do not switch languages unless explicitly requested."""
+
 _OUTPUT_FORMAT = """\
 ## Output Format
 You **must** follow these output conventions:
@@ -731,6 +735,7 @@ class PromptBuilder:
         parts.append(_TASK_FIRST_MANDATE)
         parts.append(_TASK_STATE_MANDATE)
         parts.append(_SELF_IMPROVEMENT)
+        parts.append(_LANGUAGE_REQUIREMENT)
 
         # Section 2: Operational Mode
         if mode and mode != "default":
@@ -805,6 +810,7 @@ class PromptBuilder:
         parts.append(_TASK_FIRST_MANDATE)
         parts.append(_TASK_STATE_MANDATE)
         parts.append(_SELF_IMPROVEMENT)
+        parts.append(_LANGUAGE_REQUIREMENT)
 
         # Section 2: Operational Mode
         if mode and mode != "default":
