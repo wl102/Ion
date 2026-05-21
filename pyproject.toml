@@ -23,6 +23,7 @@ dependencies = [
     "ddgs>=9.14.2",
     "playwright>=1.59.0",
     "markdown>=3.7",
+    "fpdf2>=2.8.0",
 ]
 
 [project.optional-dependencies]

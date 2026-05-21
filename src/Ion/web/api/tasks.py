@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from starlette.responses import Response
 
 from Ion.db import Database, get_default_db
-from Ion.db.models import SessionRecord, TaskRecord
+from Ion.db.models import MessageRecord, SessionRecord, TaskRecord
 from Ion.web.schemas import TaskOut, AttackGraphOut
 from Ion.web.agent_runner import WebAgentRunner
 
@@ -44,8 +44,12 @@ def get_attack_graph(sid: str, db: Session = Depends(get_db_session)):
 
 
 @router.get("/report")
-def download_report(sid: str, db: Session = Depends(get_db_session)):
-    """Assemble a Markdown exploit-chain report for the session."""
+def download_report(sid: str, request: Request, db: Session = Depends(get_db_session)):
+    """Assemble a penetration-test report for the session.
+
+    Query params:
+        format: "pdf" (default) or "markdown"
+    """
     session = db.query(SessionRecord).filter_by(id=sid).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -67,6 +71,41 @@ def download_report(sid: str, db: Session = Depends(get_db_session)):
         tm.load_from_db()
         graph_text = tm.attack_graph_view()
 
+    # Load messages for system info / endpoint extraction
+    msg_records = (
+        db.query(MessageRecord)
+        .filter_by(session_id=sid)
+        .order_by(MessageRecord.id.asc())
+        .all()
+    )
+    messages = [r.to_dict() for r in msg_records]
+
+    fmt = (request.query_params.get("format") or "pdf").lower()
+
+    if fmt == "markdown":
+        return _build_markdown_response(session, records, graph_text)
+
+    # Default: PDF
+    from Ion.web.report_generator import ReportData, generate_pdf
+
+    report_data = ReportData(
+        session=session.to_dict(),
+        tasks=[r.to_dict() for r in records],
+        messages=messages,
+        graph_text=graph_text,
+    )
+    pdf_bytes = generate_pdf(report_data)
+    filename = f"pentest-report-{session.id}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
+def _build_markdown_response(session, records, graph_text):
     completed = [r for r in records if r.status == "completed"]
     failed = [r for r in records if r.status == "failed"]
 

@@ -36,6 +36,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     net-tools \
     iputils-ping \
     dnsutils \
+    fonts-wqy-microhei \ 
+    # CJK fonts for PDF report generation (Chinese/Japanese/Korean)
+    fonts-noto-cjk \
     # Playwright Chromium runtime dependencies
     libglib2.0-0 \
     libnss3 \

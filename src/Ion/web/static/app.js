@@ -50,18 +50,18 @@
   // ---- Icons (inline SVG strings) ----
   const ICON = {
     search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
-    bug:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="6" width="8" height="14" rx="4"/><path d="M12 2v4M5 8l3 2M19 8l-3 2M3 14h3M21 14h-3M5 20l3-2M19 20l-3-2"/></svg>',
-    zap:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
-    terminal:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
+    bug: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="6" width="8" height="14" rx="4"/><path d="M12 2v4M5 8l3 2M19 8l-3 2M3 14h3M21 14h-3M5 20l3-2M19 20l-3-2"/></svg>',
+    zap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+    terminal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
     shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
-    lock:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>',
+    lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>',
     unlock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 019.9-1"/></svg>',
-    check:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>',
-    info:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
-    alert:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
-    download:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>',
+    info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+    alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
     server: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>',
-    clock:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+    clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
   };
 
   function pickTaskIcon(name) {
@@ -629,7 +629,7 @@
     messagesEmpty.style.display = 'none';
     let det = !historical
       ? Array.from(messages.querySelectorAll('.msg-tool'))
-          .find(el => el.dataset.toolName === toolName && el.dataset.pending === '1')
+        .find(el => el.dataset.toolName === toolName && el.dataset.pending === '1')
       : null;
     if (!det) {
       det = document.createElement('div');
@@ -895,40 +895,40 @@
     }
   }
 
-  function renderNode(t) {
-    const status = t.status || 'pending';
-    const isActive = selectedTaskId === t.id;
-    const idShort = (t.id || '').replace(/^task_/, '').slice(0, 8);
+  function renderNode(task) {
+    const status = task.status || 'pending';
+    const isActive = selectedTaskId === task.id;
+    const idShort = (task.id || '').replace(/^task_/, '').slice(0, 8);
 
     const tags = [];
-    const attempts = t.attempt_count || 0;
-    const maxAttempts = t.max_attempts || 1;
+    const attempts = task.attempt_count || 0;
+    const maxAttempts = task.max_attempts || 1;
     if (attempts === 0) {
       tags.push(`<span class="atlas-node-tag">${ICON.info}${t('node.autoScan')}</span>`);
     } else {
       tags.push(`<span class="atlas-node-tag">${ICON.info}${t('node.attempt')}_${attempts}/${maxAttempts}</span>`);
     }
-    if (t.intelligence_source) {
-      tags.push(`<span class="atlas-node-tag atlas-node-tag-info">${ICON.shield}${t('node.intel')}${esc(t.intelligence_source).slice(0, 24)}</span>`);
+    if (task.intelligence_source) {
+      tags.push(`<span class="atlas-node-tag atlas-node-tag-info">${ICON.shield}${t('node.intel')}${esc(task.intelligence_source).slice(0, 24)}</span>`);
     }
     if (status === 'failed' || status === 'killed') {
       tags.push(`<span class="atlas-node-tag atlas-node-tag-warn">${ICON.alert}${statusLabel(status).toUpperCase()}</span>`);
-    } else if (/H3|EXPLOIT|RCE|SHELL|PRIV/.test((t.name || '').toUpperCase())) {
+    } else if (/H3|EXPLOIT|RCE|SHELL|PRIV/.test((task.name || '').toUpperCase())) {
       tags.push(`<span class="atlas-node-tag atlas-node-tag-warn">${ICON.alert}${t('node.critical')}</span>`);
     }
 
     return `
-      <div class="atlas-node${isActive ? ' active' : ''}" data-id="${esc(t.id)}" data-status="${esc(status)}">
+      <div class="atlas-node${isActive ? ' active' : ''}" data-id="${esc(task.id)}" data-status="${esc(status)}">
         <div class="atlas-node-card">
           <div class="atlas-node-row">
-            <div class="atlas-node-icon">${pickTaskIcon(t.name)}</div>
+            <div class="atlas-node-icon">${pickTaskIcon(task.name)}</div>
             <div class="atlas-node-content">
               <div class="atlas-node-meta-row">
                 <span class="atlas-node-status">${esc(statusLabel(status))}</span>
                 <span class="atlas-node-id">ID: ${esc(idShort)}</span>
               </div>
-              <h3 class="atlas-node-title">${esc(t.name || t('node.untitled'))}</h3>
-              <p class="atlas-node-desc">${esc(t.description || '')}</p>
+              <h3 class="atlas-node-title">${esc(task.name || t('node.untitled'))}</h3>
+              <p class="atlas-node-desc">${esc(task.description || '')}</p>
               <div class="atlas-node-tags">${tags.join('')}</div>
             </div>
           </div>
@@ -983,9 +983,9 @@
       killed: 'atlas-detail-chip-danger',
     }[status] || '';
     const chipIcon = status === 'completed' ? ICON.check
-                   : status === 'failed' || status === 'killed' ? ICON.alert
-                   : status === 'running' ? ICON.zap
-                   : ICON.clock;
+      : status === 'failed' || status === 'killed' ? ICON.alert
+        : status === 'running' ? ICON.zap
+          : ICON.clock;
 
     const resultBlock = task.result
       ? `<pre class="atlas-detail-result"># cat execution_log.txt\n${esc(task.result)}</pre>`
@@ -1062,13 +1062,13 @@
   async function downloadReport() {
     if (!currentSid) return;
     try {
-      const res = await fetch(`${API}/api/sessions/${currentSid}/tasks/report`);
+      const res = await fetch(`${API}/api/sessions/${currentSid}/tasks/report?format=pdf`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
       const blob = await res.blob();
-      const filename = `exploit-chain-atlas-${currentSid}.md`;
+      const filename = `pentest-report-${currentSid}.pdf`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
