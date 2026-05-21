@@ -20,15 +20,19 @@
           </svg>
           <div>
             <h1 class="logo-title">ION</h1>
-            <span class="logo-sub">Agent Console</span>
+            <span class="logo-sub" data-i18n="app.title">Agent Console</span>
           </div>
         </div>
-        <button class="btn-icon" id="btn-new-session" title="New Session">
+        <select class="lang-select" id="lang-select">
+          <option value="zh-CN">中文</option>
+          <option value="en">English</option>
+        </select>
+        <button class="btn-icon" id="btn-new-session" data-i18n-title="session.new" title="New Session">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
       </div>
       <div class="session-list" id="session-list">
-        <div class="session-empty">No sessions yet</div>
+        <div class="session-empty" data-i18n="session.empty">No sessions yet</div>
       </div>
     </aside>
 
@@ -41,30 +45,31 @@
             <svg class="welcome-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
             </svg>
-            <h2>Ion Security Agent</h2>
-            <p>Describe your task — a session is created automatically.</p>
+            <h2 data-i18n="welcome.title">Ion Security Agent</h2>
+            <p data-i18n="welcome.desc">Describe your task — a session is created automatically.</p>
           </div>
           <div class="welcome-form">
             <div class="welcome-row">
-              <label class="welcome-mode-label" for="welcome-mode">MODE</label>
+              <label class="welcome-mode-label" for="welcome-mode" data-i18n="welcome.mode">MODE</label>
               <select id="welcome-mode" class="welcome-mode-select">
-                <option value="general" selected>General</option>
-                <option value="security">Security</option>
-                <option value="ctf">CTF</option>
+                <option value="general" selected data-i18n="welcome.mode.general">General</option>
+                <option value="security" data-i18n="welcome.mode.security">Security</option>
+                <option value="ctf" data-i18n="welcome.mode.ctf">CTF</option>
               </select>
             </div>
             <textarea
               id="welcome-query"
               class="welcome-query"
               rows="4"
+              data-i18n="welcome.placeholder"
               placeholder="e.g. Scan 192.168.1.1:6379 for known Redis vulnerabilities..."
               autocomplete="off"
             ></textarea>
             <div class="welcome-actions">
-              <span class="welcome-hint" id="welcome-hint">Enter to send · Shift+Enter for newline</span>
+              <span class="welcome-hint" id="welcome-hint" data-i18n="welcome.hint">Enter to send · Shift+Enter for newline</span>
               <button class="btn-primary welcome-submit" id="btn-welcome-submit">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                <span id="welcome-submit-label">Start Session</span>
+                <span id="welcome-submit-label" data-i18n="welcome.start">Start Session</span>
               </button>
             </div>
           </div>
@@ -88,14 +93,14 @@
                 <p class="atlas-brand-sub" id="topbar-subtitle">Session • idle</p>
               </div>
             </div>
-            <span class="topbar-status" id="topbar-status">idle</span>
+            <span class="topbar-status" id="topbar-status" data-i18n="status.idle">idle</span>
           </div>
           <div class="topbar-actions">
-            <button class="btn-ghost btn-download hidden" id="btn-download-report" title="Download report">
+            <button class="btn-ghost btn-download hidden" id="btn-download-report" data-i18n-title="topbar.report" title="Download report">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              <span>Report</span>
+              <span data-i18n="topbar.report">Report</span>
             </button>
-            <button class="btn-ghost btn-danger" id="btn-delete-session" title="Delete">
+            <button class="btn-ghost btn-danger" id="btn-delete-session" data-i18n-title="session.delete" title="Delete">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
             </button>
           </div>
@@ -106,29 +111,29 @@
           <!-- Chat Panel (narrower) -->
           <div class="chat-panel">
             <div class="chat-header">
-              <span class="chat-header-label">CONSOLE</span>
+              <span class="chat-header-label" data-i18n="chat.label">CONSOLE</span>
               <span class="chat-header-meta" id="chat-header-meta"></span>
             </div>
             <div class="messages" id="messages">
               <div class="messages-empty" id="messages-empty">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
-                <p>Send a query to start the agent</p>
+                <p data-i18n="chat.empty">Send a query to start the agent</p>
               </div>
             </div>
 
             <!-- Query Input -->
             <div class="input-bar" id="input-bar">
               <div class="input-row">
-                <textarea id="query-input" placeholder="Enter your security task..." rows="1" autocomplete="off"></textarea>
-                <button class="btn-primary btn-send" id="btn-run" title="Run">
+                <textarea id="query-input" data-i18n="chat.placeholder" placeholder="Enter your security task..." rows="1" autocomplete="off"></textarea>
+                <button class="btn-primary btn-send" id="btn-run" data-i18n-title="status.running" title="Run">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                 </button>
-                <button class="btn-danger btn-send hidden" id="btn-interrupt" title="Interrupt">
+                <button class="btn-danger btn-send hidden" id="btn-interrupt" data-i18n-title="status.paused" title="Interrupt">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
                 </button>
               </div>
               <div class="input-meta">
-                <span class="input-hint" id="input-hint">Shift+Enter for newline</span>
+                <span class="input-hint" id="input-hint" data-i18n="chat.hint.newline">Shift+Enter for newline</span>
               </div>
             </div>
           </div>
@@ -138,9 +143,9 @@
             <div class="atlas-header">
               <div class="atlas-header-left">
                 <span class="atlas-header-arrow">›</span>
-                <span class="atlas-header-title">PROPAGATION_LINKAGE_FLOW</span>
+                <span class="atlas-header-title" data-i18n="atlas.header">PROPAGATION_LINKAGE_FLOW</span>
               </div>
-              <div class="atlas-header-right" id="atlas-header-right">PLANNING…</div>
+              <div class="atlas-header-right" id="atlas-header-right" data-i18n="atlas.state.planning">PLANNING…</div>
             </div>
 
             <div class="atlas-body">
@@ -149,15 +154,15 @@
                   <div class="atlas-empty-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
                   </div>
-                  <h3>Awaiting Exploit Chain</h3>
-                  <p>Send a target query in the console — the agent will plan and execute tasks here.</p>
+                  <h3 data-i18n="atlas.empty.title">Awaiting Exploit Chain</h3>
+                  <p data-i18n="atlas.empty.desc">Send a target query in the console — the agent will plan and execute tasks here.</p>
                 </div>
               </div>
 
               <aside class="atlas-detail hidden" id="atlas-detail">
                 <div class="atlas-detail-header">
-                  <span class="atlas-detail-label">ANALYSIS RESULTS</span>
-                  <button class="btn-icon" id="btn-detail-close" title="Close">
+                  <span class="atlas-detail-label" data-i18n="atlas.detail.title">ANALYSIS RESULTS</span>
+                  <button class="btn-icon" id="btn-detail-close" data-i18n-title="atlas.detail.close" title="Close">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                   </button>
                 </div>
@@ -167,21 +172,21 @@
 
             <div class="atlas-footer">
               <div class="atlas-footer-stat">
-                <span class="atlas-footer-key">TASKS_TOTAL:</span>
+                <span class="atlas-footer-key" data-i18n="atlas.footer.total">TASKS_TOTAL:</span>
                 <span class="atlas-footer-val" id="stat-total">00</span>
               </div>
               <div class="atlas-footer-stat">
-                <span class="atlas-footer-key">COMPLETED:</span>
+                <span class="atlas-footer-key" data-i18n="atlas.footer.completed">COMPLETED:</span>
                 <span class="atlas-footer-val" id="stat-completed">00</span>
               </div>
               <div class="atlas-footer-stat">
-                <span class="atlas-footer-key">FAILED:</span>
+                <span class="atlas-footer-key" data-i18n="atlas.footer.failed">FAILED:</span>
                 <span class="atlas-footer-val" id="stat-failed">00</span>
               </div>
               <div class="atlas-footer-spacer"></div>
               <div class="atlas-footer-stat">
                 <span class="atlas-footer-dot" id="stat-dot"></span>
-                <span class="atlas-footer-key" id="stat-state">SYSTEM IDLE</span>
+                <span class="atlas-footer-key" id="stat-state" data-i18n="atlas.footer.state.idle">SYSTEM IDLE</span>
               </div>
             </div>
           </div>
@@ -194,13 +199,13 @@
   <div class="modal-overlay hidden" id="modal-graph">
     <div class="modal modal-lg">
       <div class="modal-header">
-        <h3>Attack Graph</h3>
+        <h3 data-i18n="graph.title">Attack Graph</h3>
         <button class="btn-icon" id="btn-graph-close">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
       <div class="modal-body">
-        <pre class="graph-content" id="graph-content">Loading...</pre>
+        <pre class="graph-content" id="graph-content" data-i18n="graph.loading">Loading...</pre>
       </div>
     </div>
   </div>
@@ -209,6 +214,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="/i18n.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
