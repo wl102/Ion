@@ -14,8 +14,8 @@ def main():
     )
     parser.add_argument("--log-dir", help="Directory for observability logs")
     parser.add_argument("--model", help="Override MODEL_ID")
-    parser.add_argument("--base-url", help="Override OPENAI_BASE_URL")
-    parser.add_argument("--api-key", help="Override OPENAI_API_KEY")
+    parser.add_argument("--base-url", help="Override API_BASE")
+    parser.add_argument("--api-key", help="Override API_KEY")
     parser.add_argument(
         "--system-prompt", help="Custom system prompt (legacy mode only)"
     )

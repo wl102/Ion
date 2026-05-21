@@ -5,10 +5,8 @@ import uuid
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from openai import OpenAI
 from sqlalchemy.orm import Session
 
-from Ion.compat import adapt_messages_for_model
 from Ion.db import Database, get_default_db
 from Ion.db.models import SessionRecord
 from Ion.web.schemas import SessionCreate, SessionOut
@@ -136,13 +134,14 @@ def _generate_title(query: str, mode: str) -> str:
         return "Untitled"
 
     model_id = os.getenv("MODEL_ID", "")
-    base_url = os.getenv("OPENAI_BASE_URL")
-    api_key = os.getenv("OPENAI_API_KEY")
+    base_url = os.getenv("API_BASE")
+    api_key = os.getenv("API_KEY")
     if not (model_id and base_url and api_key):
         return _fallback_title(query)
 
     try:
-        client = OpenAI(base_url=base_url, api_key=api_key, timeout=30.0)
+        import litellm
+
         # max_tokens is generous so reasoning-style models (which spend the
         # bulk of their budget on internal chain-of-thought) can still emit
         # the final title in the output channel.
@@ -158,12 +157,19 @@ def _generate_title(query: str, mode: str) -> str:
                 ),
             },
         ]
-        resp = client.chat.completions.create(
-            model=model_id,
-            messages=adapt_messages_for_model(raw_messages, model_id),
-            max_tokens=2048,
-            temperature=0.2,
-        )
+        from Ion.ion import _adapt_messages_for_model
+
+        create_kwargs = {
+            "model": model_id,
+            "messages": _adapt_messages_for_model(raw_messages, model_id),
+            "max_tokens": 2048,
+            "temperature": 0.2,
+        }
+        if api_key:
+            create_kwargs["api_key"] = api_key
+        if base_url:
+            create_kwargs["api_base"] = base_url
+        resp = litellm.completion(**create_kwargs)
         title = _clean_title(resp.choices[0].message.content or "")
         if not title or _looks_like_refusal(title):
             return _fallback_title(query)

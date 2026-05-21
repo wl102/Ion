@@ -7,8 +7,9 @@ from contextvars import ContextVar
 from typing import Any, Optional, Literal
 
 from pydantic import BaseModel
+import litellm
+
 from Ion.tools.registry import dispatch
-from Ion.compat import adapt_messages_for_model, get_stream_create_kwargs
 from Ion.subagent_models import (
     Budget,
     StopConditions,
@@ -154,7 +155,30 @@ def _vprint(verbose: bool, *args, **kwargs):
         print(*args, **kwargs)
 
 
-def _compress_context(client, model_id: str, state: LoopState, logger=None):
+# OpenAI chat-completion message fields that may appear in a request body.
+# Anything else (e.g. our internal ``reasoning_content``) is stripped before
+# calling litellm so that strict providers don't reject unknown keys.
+_ALLOWED_MESSAGE_FIELDS = {"role", "content", "name", "tool_calls", "tool_call_id", "refusal"}
+
+
+def _adapt_messages_for_model(messages: list[dict], model_id: str) -> list[dict]:
+    """Return a sanitized copy of *messages* ready for the LLM API.
+
+    1. Strip any non-standard fields so providers never see unknown keys.
+    2. MiniMax: ``role="system"`` is rejected (error 2013).  Rewrite every
+       ``system`` message to ``user``.
+    """
+    is_minimax = "minimax" in model_id.lower()
+    adapted: list[dict] = []
+    for msg in messages:
+        m = {k: v for k, v in msg.items() if k in _ALLOWED_MESSAGE_FIELDS}
+        if is_minimax and m.get("role") == "system":
+            m["role"] = "user"
+        adapted.append(m)
+    return adapted
+
+
+def _compress_context(model_id: str, api_key: str, base_url: str, state: LoopState, logger=None):
     """
     Compress older conversation history by summarizing it via an LLM call.
 
@@ -224,12 +248,17 @@ Wrap your summary in <summary></summary> tags.""",
     ]
 
     try:
-        summary_resp = client.chat.completions.create(
-            model=model_id,
-            messages=summary_messages,
-            max_tokens=4000,
-            stream=False,
-        )
+        create_kwargs = {
+            "model": model_id,
+            "messages": _adapt_messages_for_model(summary_messages, model_id),
+            "max_tokens": 4000,
+            "stream": False,
+        }
+        if api_key:
+            create_kwargs["api_key"] = api_key
+        if base_url:
+            create_kwargs["api_base"] = base_url
+        summary_resp = litellm.completion(**create_kwargs)
         summary = summary_resp.choices[0].message.content or ""
     except Exception:
         # If summarization fails, fall back to a simple eviction note
@@ -253,8 +282,9 @@ Wrap your summary in <summary></summary> tags.""",
 
 
 def run_one_turn(
-    client,
     model_id: str,
+    api_key: str,
+    base_url: str,
     state: LoopState,
     tools: list[dict],
     logger=None,
@@ -266,30 +296,21 @@ def run_one_turn(
     prefix_printed = False
     message_id: str | None = None
 
-    # Provider-specific message adaptations (e.g. MiniMax rejects system role)
-    api_messages = adapt_messages_for_model(state.messages, model_id)
-
     _ctx_token = _active_callbacks_ctx.set(callbacks)
     try:
-        # Try streaming with usage; fall back if provider doesn't support stream_options.
-        try:
-            create_kwargs = {
-                "model": model_id,
-                "messages": api_messages,
-                "tools": tools,
-                "tool_choice": "auto",
-                "stream": True,
-                **get_stream_create_kwargs(model_id),
-            }
-            response = client.chat.completions.create(**create_kwargs)
-        except Exception:
-            response = client.chat.completions.create(
-                model=model_id,
-                messages=api_messages,
-                tools=tools,
-                tool_choice="auto",
-                stream=True,
-            )
+        create_kwargs = {
+            "model": model_id,
+            "messages": _adapt_messages_for_model(state.messages, model_id),
+            "tools": tools,
+            "tool_choice": "auto",
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if api_key:
+            create_kwargs["api_key"] = api_key
+        if base_url:
+            create_kwargs["api_base"] = base_url
+        response = litellm.completion(**create_kwargs)
 
         content_parts = []
         reasoning_content_parts = []
@@ -349,11 +370,18 @@ def run_one_turn(
                             tc["function"]["name"] = tc_delta.function.name
                         if tc_delta.function.arguments:
                             tc["function"]["arguments"] += tc_delta.function.arguments
+            # Try standard reasoning_content (DeepSeek, etc.)
+            _reasoning_text = None
             if delta and hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                _reasoning_text = delta.reasoning_content
+            # Fallback: litellm may put provider-specific fields in model_extra
+            if _reasoning_text is None and delta and hasattr(delta, "model_extra") and delta.model_extra:
+                _reasoning_text = delta.model_extra.get("reasoning_content")
+            if _reasoning_text:
                 if prefix and not prefix_printed:
                     _vprint(verbose, prefix, end="", flush=True)
                     prefix_printed = True
-                text = delta.reasoning_content
+                text = _reasoning_text
                 reasoning_content_parts.append(text)
                 if not reasoning:
                     reasoning = True
@@ -365,8 +393,13 @@ def run_one_turn(
                         cb(text, reasoning=True, message_id=message_id, agent_name=agent_name)
 
             # MiniMax reasoning_split returns cumulative text inside reasoning_details
+            _reasoning_details = None
             if delta and hasattr(delta, "reasoning_details") and delta.reasoning_details:
-                for detail in delta.reasoning_details:
+                _reasoning_details = delta.reasoning_details
+            if _reasoning_details is None and delta and hasattr(delta, "model_extra") and delta.model_extra:
+                _reasoning_details = delta.model_extra.get("reasoning_details")
+            if _reasoning_details:
+                for detail in _reasoning_details:
                     if isinstance(detail, dict) and "text" in detail:
                         full_text = detail["text"] or ""
                         if len(full_text) > len(reasoning_buffer):
@@ -543,8 +576,9 @@ def _check_and_inject_hooks(state: LoopState):
 
 
 def run_agent_loop(
-    client,
     model_id: str,
+    api_key: str,
+    base_url: str,
     state: LoopState,
     tools: list[dict],
     logger=None,
@@ -584,14 +618,14 @@ def run_agent_loop(
             if state.context_max_tokens > 0:
                 estimated = _estimate_tokens(state)
                 if estimated > state.context_max_tokens - 20000:
-                    _compress_context(client, model_id, state, logger)
+                    _compress_context(model_id, api_key, base_url, state, logger)
 
             if on_before_turn is not None:
                 on_before_turn(state)
 
             _check_and_inject_hooks(state)
 
-            run_one_turn(client, model_id, state, tools, logger, agent_name=agent_name, callbacks=callbacks, verbose=verbose)
+            run_one_turn(model_id, api_key, base_url, state, tools, logger, agent_name=agent_name, callbacks=callbacks, verbose=verbose)
 
             if callbacks:
                 cb = callbacks.get("on_turn_complete")
@@ -607,7 +641,7 @@ def run_agent_loop(
                 # Remove the truncated assistant message before compressing
                 if state.messages and state.messages[-1].get("role") == "assistant":
                     state.messages.pop()
-                _compress_context(client, model_id, state, logger)
+                _compress_context(model_id, api_key, base_url, state, logger)
                 state.finish_reason = None
                 continue  # retry the turn after compression
 
@@ -763,8 +797,9 @@ def _map_violation_to_why(violation: str) -> WhyStopped:
 
 
 def run_subagent_loop(
-    client,
     model_id: str,
+    api_key: str,
+    base_url: str,
     state: LoopState,
     tools: list[dict],
     budget: Budget,
@@ -798,7 +833,7 @@ def run_subagent_loop(
                 tracker.status_transitions.append("max_turns_reached")
                 _inject_termination_message(state, "max_turns_reached")
                 _force_final_turn(
-                    client, model_id, state, tools, logger, agent_name,
+                    model_id, api_key, base_url, state, tools, logger, agent_name,
                     callbacks=callbacks, verbose=verbose,
                 )
                 return _extract_result(state, tracker, WhyStopped.MAX_TURNS, goal=goal)
@@ -807,13 +842,13 @@ def run_subagent_loop(
             if state.context_max_tokens > 0:
                 estimated = _estimate_tokens(state)
                 if estimated > state.context_max_tokens - 20000:
-                    _compress_context(client, model_id, state, logger)
+                    _compress_context(model_id, api_key, base_url, state, logger)
 
             if on_before_turn is not None:
                 on_before_turn(state)
 
             run_one_turn(
-                client, model_id, state, tools, logger,
+                model_id, api_key, base_url, state, tools, logger,
                 agent_name=agent_name, callbacks=callbacks, verbose=verbose,
             )
 
@@ -857,7 +892,7 @@ def run_subagent_loop(
                 tracker.status_transitions.append(f"budget:{budget_violation}")
                 _inject_termination_message(state, budget_violation)
                 _force_final_turn(
-                    client, model_id, state, tools, logger, agent_name,
+                    model_id, api_key, base_url, state, tools, logger, agent_name,
                     callbacks=callbacks, verbose=verbose,
                 )
                 why = _map_violation_to_why(budget_violation)
@@ -867,7 +902,7 @@ def run_subagent_loop(
             if state.finish_reason == "length":
                 if state.messages and state.messages[-1].get("role") == "assistant":
                     state.messages.pop()
-                _compress_context(client, model_id, state, logger)
+                _compress_context(model_id, api_key, base_url, state, logger)
                 state.finish_reason = None
                 continue
 
@@ -883,7 +918,7 @@ def run_subagent_loop(
                         state, f"natural_stop_without_json:{state.finish_reason}"
                     )
                     _force_final_turn(
-                        client, model_id, state, tools, logger, agent_name,
+                        model_id, api_key, base_url, state, tools, logger, agent_name,
                         callbacks=callbacks, verbose=verbose,
                     )
                 return _extract_result(state, tracker, WhyStopped.SUCCESS, goal=goal)
@@ -924,8 +959,9 @@ def _inject_termination_message(state: LoopState, reason: str):
 
 
 def _force_final_turn(
-    client,
     model_id: str,
+    api_key: str,
+    base_url: str,
     state: LoopState,
     tools: list[dict],
     logger,
@@ -937,7 +973,7 @@ def _force_final_turn(
     try:
         # Temporarily remove tools so the model can only output text
         run_one_turn(
-            client, model_id, state, [], logger,
+            model_id, api_key, base_url, state, [], logger,
             agent_name=agent_name, callbacks=callbacks, verbose=verbose,
         )
     except Exception:

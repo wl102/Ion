@@ -62,8 +62,8 @@ class WebAgentRunner:
         )
 
         _model_id = model_id or os.getenv("MODEL_ID", "")
-        _base_url = base_url or os.getenv("OPENAI_BASE_URL")
-        _api_key = api_key or os.getenv("OPENAI_API_KEY")
+        _base_url = base_url or os.getenv("API_BASE")
+        _api_key = api_key or os.getenv("API_KEY")
 
         def _persist_observability(category: str, entry: dict) -> None:
             # Tool calls are already persisted by on_tool_result callback.

@@ -12,8 +12,6 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from openai import OpenAI
-
 from Ion.subagent_models import (
     Budget,
     DelegationCheck,
@@ -195,17 +193,11 @@ def _run_subagent(
     # Build lightweight agent loop
     # ------------------------------------------------------------------
     model_id = os.getenv("MODEL_ID", "")
-    base_url = os.getenv("OPENAI_BASE_URL")
-    api_key = os.getenv("OPENAI_API_KEY")
+    base_url = os.getenv("API_BASE")
+    api_key = os.getenv("API_KEY")
 
     if not model_id:
         return tool_error("Missing MODEL_ID environment variable.")
-    if not base_url:
-        return tool_error("Missing OPENAI_BASE_URL environment variable.")
-    if not api_key:
-        return tool_error("Missing OPENAI_API_KEY environment variable.")
-
-    client = OpenAI(base_url=base_url, api_key=api_key)
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -253,8 +245,9 @@ def _run_subagent(
 
     try:
         result: SubagentResult = run_subagent_loop(
-            client,
             model_id,
+            api_key,
+            base_url,
             state,
             filtered_tools,
             budget=req.budget,

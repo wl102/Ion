@@ -3,8 +3,6 @@ import queue
 from typing import Any, Optional
 
 from dotenv import load_dotenv
-from openai import OpenAI
-
 from Ion.ion import LoopState, run_agent_loop
 from Ion.observability import ObservabilityLogger
 from Ion.prompts import PromptBuilder
@@ -94,8 +92,8 @@ class IonAgent:
         verbose: bool = True,
     ):
         self.model_id = model_id or os.getenv("MODEL_ID", "")
-        self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.base_url = base_url or os.getenv("API_BASE")
+        self.api_key = api_key or os.getenv("API_KEY")
         self.max_turns = max_turns or int(os.getenv("AGENT_MAX_LOOP", "0"))
         self.context_max_tokens = context_max_tokens or int(
             os.getenv("CONTEXT_MAX_TOKENS", "0")
@@ -104,16 +102,7 @@ class IonAgent:
 
         if not self.model_id:
             raise ValueError("Missing MODEL_ID. Set env var or pass to constructor.")
-        if not self.base_url:
-            raise ValueError(
-                "Missing OPENAI_BASE_URL. Set env var or pass to constructor."
-            )
-        if not self.api_key:
-            raise ValueError(
-                "Missing OPENAI_API_KEY. Set env var or pass to constructor."
-            )
 
-        self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
         self.task_manager = task_manager or TaskManager()
         self.skill_registry = skill_registry or SkillRegistry()
         self.agent_registry = agent_registry or AgentRegistry()
@@ -293,8 +282,9 @@ class IonAgent:
         tm_token = set_current_task_manager(self.task_manager)
         try:
             run_agent_loop(
-                self.client,
                 self.model_id,
+                self.api_key,
+                self.base_url,
                 state,
                 self.tools,
                 self.logger,
