@@ -268,4 +268,11 @@ def delete_session(sid: str, db: Session = Depends(get_db_session)):
     from Ion.web.agent_runner import WebAgentRunner
 
     WebAgentRunner.remove(sid)
+
+    # Clean up cached PDF report
+    from Ion.web.api.tasks import _cache_path
+    cache = _cache_path(sid)
+    if cache.exists():
+        cache.unlink()
+
     return {"deleted": True}

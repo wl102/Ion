@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -7,8 +8,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from Ion.web.api import sessions, tasks, agent, logs, messages
+from Ion.web.pdf_service import get_pdf_renderer
 
-app = FastAPI(title="Ion Agent Web API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage global PdfRenderer lifecycle."""
+    renderer = get_pdf_renderer()
+    await renderer.start()
+    yield
+    await renderer.close()
+
+
+app = FastAPI(title="Ion Agent Web API", version="0.1.0", lifespan=lifespan)
 
 # CORS — allow all origins for local development
 app.add_middleware(

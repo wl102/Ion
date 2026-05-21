@@ -170,6 +170,57 @@ You **must** follow these output conventions:
 - **Structured** — Use bullet points, code blocks, and tables to organize complex information.
 - **Actionable** — Conclude with clear next steps or recommendations."""
 
+_FINAL_REPORT_FORMAT = """\
+## Final Report Requirement (MANDATORY)
+
+Upon completing ALL mission objectives, you MUST call the `submit_report` tool **exactly once** to persist a comprehensive penetration test report. This is required regardless of whether vulnerabilities were found.
+
+The tool call expects two parts:
+
+### 1. `summary_fields` — Structured Data
+
+A JSON object with these fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `target` | string | Target IP or hostname |
+| `vuln_count` | integer | Total vulnerabilities found |
+| `max_severity` | "High" / "Medium" / "Low" / "Info" | Highest severity observed |
+| `services_discovered` | string[] | List of `IP:Port` services |
+| `vulnerabilities` | object[] | Detailed vulnerability list |
+
+Each vulnerability in `vulnerabilities`:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Vulnerability name (e.g. "SQL Injection in login.php") |
+| `service` | yes | Affected service as `IP:Port` |
+| `url` | no | Full URL of the affected endpoint |
+| `severity` | yes | One of High/Medium/Low/Info |
+| `type` | no | Vulnerability class (SQLi, XSS, RCE, LFI, SSRF, IDOR, etc.) |
+| `payload` | no | Exact payload or exploit command used |
+| `remediation` | no | Recommended fix |
+
+### 2. `content_markdown` — Full Narrative Report
+
+A detailed Markdown string (can be thousands of characters) that will be rendered directly into the downloadable PDF report. It MUST include:
+
+- **Executive Summary**: brief overview of the assessment scope and key findings
+- **Methodology**: approach and tools used
+- **Detailed Findings**: for each vulnerability found, include:
+  - Affected service (IP:Port) and URL
+  - Severity rating
+  - Evidence (payload, request/response excerpts, tool output)
+  - Impact analysis
+  - Remediation recommendation
+- **Attack Chain**: how findings were discovered and chained
+- **Security Recommendations**: prioritized list of fixes
+
+**Important guidelines**:
+- The `content_markdown` should be self-contained — the reader should understand the full assessment without referring back to the conversation.
+- If no vulnerabilities were found, still submit a report stating that.
+- Call `submit_report` exactly once, as the FINAL action after all tasks are done. Do NOT call it mid-mission."""
+
 # =============================================================================
 #  Section 2 — Operational Mode
 # =============================================================================
@@ -782,6 +833,7 @@ class PromptBuilder:
 
         # Section 6: Output Standards
         parts.append(_OUTPUT_FORMAT)
+        parts.append(_FINAL_REPORT_FORMAT)
 
         return "\n\n".join(parts)
 
@@ -851,6 +903,7 @@ class PromptBuilder:
 
         # Section 6: Output Standards
         parts.append(_OUTPUT_FORMAT)
+        parts.append(_FINAL_REPORT_FORMAT)
 
         return "\n\n".join(parts)
 

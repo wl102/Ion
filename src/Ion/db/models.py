@@ -36,6 +36,9 @@ class SessionRecord(Base):
     messages: Mapped[List["MessageRecord"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
+    reports: Mapped[List["ReportRecord"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -163,5 +166,30 @@ class MessageRecord(Base):
         if self.role == "tool" and self.tool_call_id:
             msg["tool_call_id"] = self.tool_call_id
         return msg
+
+
+class ReportRecord(Base):
+    """Persisted penetration test report submitted by the agent at mission end."""
+
+    __tablename__ = "reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("sessions.id", ondelete="CASCADE"), index=True
+    )
+    summary_fields: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    content_markdown: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    session: Mapped["SessionRecord"] = relationship(back_populates="reports")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "session_id": self.session_id,
+            "summary_fields": json.loads(self.summary_fields) if self.summary_fields else {},
+            "content_markdown": self.content_markdown,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
 
 

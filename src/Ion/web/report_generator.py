@@ -1,19 +1,30 @@
 """Penetration test report generator.
 
-Produces rich PDF reports from session data (tasks, messages, attack graph).
+Produces rich PDF reports from session data (tasks, messages, attack graph)
+by rendering Markdown → HTML → Playwright PDF.
 """
 
 from __future__ import annotations
 
+import html as html_module
 import json
-import os
 import re
-import textwrap
 from datetime import datetime
-from io import BytesIO
+from pathlib import Path
 from typing import Any, Optional
 
-from fpdf import FPDF
+import markdown
+
+from Ion.web.pdf_service import get_pdf_renderer
+
+
+# ---------------------------------------------------------------------------
+# HTML escaping helper
+# ---------------------------------------------------------------------------
+
+
+def _esc(text: str | None) -> str:
+    return html_module.escape(str(text) if text is not None else "")
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +309,7 @@ class ReportData:
         tasks: list[dict],
         messages: list[dict],
         graph_text: str,
+        report_record: Optional[dict] = None,
     ):
         self.session = session
         self.tasks = tasks
@@ -306,6 +318,13 @@ class ReportData:
 
         self.system_info = _extract_system_info(messages)
         self.endpoints = _extract_endpoints(messages)
+
+        # Model-submitted report (from submit_report tool call)
+        self.model_markdown: Optional[str] = None
+        self.model_summary: dict[str, Any] = {}
+        if report_record:
+            self.model_markdown = report_record.get("content_markdown")
+            self.model_summary = report_record.get("summary_fields") or {}
 
         # Build vulnerability list from completed tasks with interesting results
         self.vulnerabilities: list[dict] = []
@@ -394,6 +413,27 @@ class ReportData:
             )
 
     def risk_summary(self) -> str:
+        # Prefer model-submitted summary if available
+        if self.model_summary:
+            mc = self.model_summary
+            target_str = mc.get("target", "")
+            vuln_count = mc.get("vuln_count", 0)
+            max_sev = mc.get("max_severity", "Info")
+            total_tasks = len(self.tasks)
+            completed = sum(1 for t in self.tasks if t.get("status") == "completed")
+            lines = [
+                f"测试目标: {target_str}",
+                f"共执行 {total_tasks} 个任务，{completed} 个已完成。",
+                f"发现漏洞 {vuln_count} 个，最高严重级别: {max_sev}。",
+            ]
+            if max_sev.lower() == "high":
+                lines.append("存在高危漏洞，系统面临严重安全风险，建议立即采取修复措施。")
+            elif max_sev.lower() == "medium":
+                lines.append("存在中危漏洞，建议尽快修复以降低安全风险。")
+            else:
+                lines.append("未发现明显高危漏洞，但建议持续进行安全监测。")
+            return "\n".join(lines)
+        # Fallback: compute from auto-extracted vulnerabilities
         high = sum(1 for v in self.vulnerabilities if v["severity"] == "high")
         medium = sum(1 for v in self.vulnerabilities if v["severity"] == "medium")
         low = sum(1 for v in self.vulnerabilities if v["severity"] == "low")
@@ -414,353 +454,508 @@ class ReportData:
 
 
 # ---------------------------------------------------------------------------
-# PDF renderer (fpdf2)
+# HTML report builder
 # ---------------------------------------------------------------------------
 
-
-class _PDF(FPDF):
-    def __init__(self) -> None:
-        super().__init__()
-        self._setup_fonts()
-
-    def _setup_fonts(self) -> None:
-        # Try common CJK font paths
-        font_paths = [
-            # 优先尝试文泉驿微米黑，它在 Linux 下生成 PDF 的兼容性最好
-            (
-                "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-                "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-            ),
-            # 其次尝试你的 Noto CJK
-            (
-                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-                "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-            ),
-        ]
-        for regular, bold in font_paths:
-            if os.path.exists(regular) and os.path.exists(bold):
-                self.add_font("NotoSans", "", regular)
-                self.add_font("NotoSans", "B", bold)
-                self.set_font("NotoSans", "", 11)
-                return
-        # Fallback to built-in Helvetica (ASCII only)
-        self.set_font("Helvetica", "", 11)
-
-    def header(self) -> None:
-        if self.page_no() == 1:
-            return  # Skip header on cover
-        self.set_font("NotoSans", "", 9)
-        self.set_text_color(120, 120, 120)
-        self.cell(0, 8, "Ion 渗透测试报告", align="L")
-        self.cell(0, 8, f"第 {self.page_no()} 页", align="R")
-        self.ln(8)
-        self.set_draw_color(200, 200, 200)
-        self.line(10, self.get_y(), 200, self.get_y())
-        self.ln(2)
-
-    def footer(self) -> None:
-        self.set_y(-15)
-        self.set_font("NotoSans", "", 8)
-        self.set_text_color(150, 150, 150)
-        self.cell(
-            0,
-            10,
-            f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            align="C",
-        )
-
-    def chapter_title(self, title: str, level: int = 1) -> None:
-        if level == 1:
-            self.set_font("NotoSans", "B", 16)
-            self.set_text_color(220, 53, 69)
-            self.ln(4)
-            self.cell(0, 10, title, new_x="LMARGIN", new_y="NEXT")
-            self.set_draw_color(220, 53, 69)
-            self.line(10, self.get_y(), 200, self.get_y())
-            self.ln(4)
-        elif level == 2:
-            self.set_font("NotoSans", "B", 13)
-            self.set_text_color(40, 40, 40)
-            self.ln(3)
-            self.cell(0, 8, title, new_x="LMARGIN", new_y="NEXT")
-            self.ln(1)
-        else:
-            self.set_font("NotoSans", "B", 11)
-            self.set_text_color(60, 60, 60)
-            self.ln(2)
-            self.cell(0, 6, title, new_x="LMARGIN", new_y="NEXT")
-
-    def body_text(self, text: str) -> None:
-        self.set_font("NotoSans", "", 10)
-        self.set_text_color(50, 50, 50)
-        self.multi_cell(0, 6, text)
-        self.ln(1)
-
-    def code_block(self, code: str) -> None:
-        self.set_fill_color(245, 245, 245)
-        self.set_draw_color(220, 220, 220)
-        # Use NotoSans for CJK support in code blocks; Courier lacks Unicode
-        self.set_font("NotoSans", "", 9)
-        self.set_text_color(30, 30, 30)
-        wrapped = textwrap.fill(code, width=95)
-        self.multi_cell(0, 5, wrapped, border=1, fill=True)
-        self.ln(2)
-
-    def severity_badge(self, severity: str) -> None:
-        colors = {
-            "high": (220, 53, 69),
-            "medium": (255, 136, 0),
-            "low": (255, 193, 7),
-            "info": (108, 117, 125),
-        }
-        bg = colors.get(severity, colors["info"])
-        labels = {
-            "high": "高危",
-            "medium": "中危",
-            "low": "低危",
-            "info": "信息",
-        }
-        # Draw rounded-ish rectangle
-        self.set_fill_color(*bg)
-        self.set_text_color(255, 255, 255)
-        self.set_font("NotoSans", "B", 10)
-        label = labels.get(severity, severity.upper())
-        w = self.get_string_width(label) + 6
-        self.cell(w, 7, f"  {label}  ", fill=True, new_x="LMARGIN", new_y="NEXT")
-        self.set_text_color(50, 50, 50)
-
-    def info_table(self, rows: list[tuple[str, str]]) -> None:
-        col1_w = 45
-        col2_w = 145
-        self.set_font("NotoSans", "B", 10)
-        self.set_fill_color(240, 240, 240)
-        for key, val in rows:
-            self.cell(col1_w, 7, f"  {key}", border=1, fill=True)
-            self.set_font("NotoSans", "", 10)
-            self.cell(col2_w, 7, f"  {val}", border=1)
-            self.ln(7)
-            self.set_font("NotoSans", "B", 10)
-        self.ln(2)
-
-    def stat_table(self, headers: list[str], rows: list[list[str]]) -> None:
-        col_w = 190 / len(headers)
-        self.set_font("NotoSans", "B", 10)
-        self.set_fill_color(220, 53, 69)
-        self.set_text_color(255, 255, 255)
-        for h in headers:
-            self.cell(col_w, 8, f"  {h}", border=1, fill=True)
-        self.ln(8)
-        self.set_text_color(50, 50, 50)
-        self.set_font("NotoSans", "", 10)
-        for row in rows:
-            for cell in row:
-                self.cell(col_w, 7, f"  {cell}", border=1)
-            self.ln(7)
-        self.ln(2)
-
-    def safe_multi_cell(self, h: float, text: str) -> None:
-        """multi_cell wrapper that resets x to left margin to avoid width errors."""
-        self.set_x(10)
-        self.multi_cell(0, h, text)
+_SEVERITY_LABELS = {"high": "高危", "medium": "中危", "low": "低危", "info": "信息"}
+_SEVERITY_COLORS = {
+    "high": "#dc3545",
+    "medium": "#ff8800",
+    "low": "#ffc107",
+    "info": "#6c757d",
+}
+_SEVERITY_BG = {
+    "high": "#f8d7da",
+    "medium": "#fff3cd",
+    "low": "#d1ecf1",
+    "info": "#e2e3e5",
+}
 
 
-def generate_pdf(report_data: ReportData) -> bytes:
-    pdf = _PDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
+def _badge(severity: str) -> str:
+    label = _SEVERITY_LABELS.get(severity, severity.upper())
+    color = _SEVERITY_COLORS.get(severity, "#6c757d")
+    return f'<span class="badge" style="background:{color}">{label}</span>'
 
-    # ---- Cover ----
-    pdf.add_page()
-    pdf.set_y(80)
-    pdf.set_font("NotoSans", "B", 28)
-    pdf.set_text_color(40, 40, 40)
-    pdf.cell(0, 15, "渗透测试报告", align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("NotoSans", "", 14)
-    pdf.set_text_color(100, 100, 100)
-    title = report_data.session.get("title") or "未命名目标"
-    pdf.cell(0, 10, title, align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(10)
-    pdf.set_font("NotoSans", "", 11)
-    pdf.cell(
-        0,
-        8,
-        f"会话 ID: {report_data.session.get('id', '')}",
-        align="C",
-        new_x="LMARGIN",
-        new_y="NEXT",
-    )
-    pdf.cell(
-        0,
-        8,
-        f"模式: {report_data.session.get('mode', '')}",
-        align="C",
-        new_x="LMARGIN",
-        new_y="NEXT",
-    )
-    created = report_data.session.get("created_at") or ""
-    if created:
-        pdf.cell(0, 8, f"创建时间: {created}", align="C", new_x="LMARGIN", new_y="NEXT")
 
-    # ---- 1. Basic Info ----
-    pdf.add_page()
-    pdf.chapter_title("基本信息", level=1)
-    rows: list[tuple[str, str]] = []
+def _build_cover(report_data: ReportData) -> str:
+    title = _esc(report_data.session.get("title") or "未命名目标")
+    sid = _esc(report_data.session.get("id", ""))
+    mode = _esc(report_data.session.get("mode", ""))
+    created = _esc(report_data.session.get("created_at") or "")
+    max_sev = ""
+    if report_data.model_summary:
+        max_sev = report_data.model_summary.get("max_severity", "")
+    risk_html = ""
+    if max_sev:
+        color = _SEVERITY_COLORS.get(max_sev.lower(), "#6c757d")
+        risk_html = f'<div class="cover-risk" style="color:{color}">风险评级: {_esc(max_sev)}</div>'
+
+    return f"""
+<div class="cover">
+  <div class="cover-icon">&#128737;</div>
+  <div class="cover-title">渗透测试报告</div>
+  <div class="cover-subtitle">{title}</div>
+  <div class="cover-meta">
+    <p><strong>会话 ID:</strong> {sid}</p>
+    <p><strong>模式:</strong> {mode}</p>
+    {f'<p><strong>创建时间:</strong> {created}</p>' if created else ''}
+  </div>
+  {risk_html}
+</div>
+"""
+
+
+def _build_basic_info(report_data: ReportData) -> str:
     si = report_data.system_info
-    rows.append(("目标 URL", si.get("target_url") or "未识别"))
-    rows.append(("系统名称", report_data.session.get("title") or "未命名"))
+    model_target = report_data.model_summary.get("target") if report_data.model_summary else None
+    target = model_target or si.get("target_url") or "未识别"
+
+    rows: list[tuple[str, str]] = [
+        ("测试目标", _esc(target)),
+        ("会话名称", _esc(report_data.session.get("title") or "未命名")),
+    ]
     if si.get("web_server"):
-        rows.append(("Web 服务器", si["web_server"]))
+        rows.append(("Web 服务器", _esc(si["web_server"])))
     if si.get("powered_by"):
-        rows.append(("技术栈", si["powered_by"]))
+        rows.append(("技术栈", _esc(si["powered_by"])))
     if si.get("php_version"):
-        rows.append(("PHP 版本", si["php_version"]))
+        rows.append(("PHP 版本", _esc(si["php_version"])))
     if si.get("framework"):
-        rows.append(("框架", si["framework"]))
+        rows.append(("框架", _esc(si["framework"])))
     if si.get("architecture"):
-        rows.append(("架构", si["architecture"]))
-    rows.append(("会话模式", report_data.session.get("mode", "")))
-    rows.append(("会话状态", report_data.session.get("status", "")))
-    pdf.info_table(rows)
+        rows.append(("架构", _esc(si["architecture"])))
+    rows.append(("模式", _esc(report_data.session.get("mode", ""))))
+    rows.append(("状态", _esc(report_data.session.get("status", ""))))
 
-    # ---- 2. Risk Summary ----
-    pdf.chapter_title("风险总结", level=1)
-    pdf.body_text(report_data.risk_summary())
+    rows_html = "\n".join(
+        f"<tr><td>{_esc(k)}</td><td>{v}</td></tr>" for k, v in rows
+    )
 
-    # Key findings
+    services_html = ""
+    if report_data.model_summary:
+        services = report_data.model_summary.get("services_discovered") or []
+        if services:
+            svc_rows = "\n".join(f"<tr><td>{_esc(s)}</td></tr>" for s in services)
+            services_html = f"""
+<h2>发现的服务</h2>
+<table class="stat-table">
+  <thead><tr><th>服务 (IP:Port)</th></tr></thead>
+  <tbody>{svc_rows}</tbody>
+</table>
+"""
+
+    return f"""
+<div class="page-break">
+  <h1>基本信息</h1>
+  <table class="info-table">
+    <tbody>{rows_html}</tbody>
+  </table>
+  {services_html}
+</div>
+"""
+
+
+def _build_risk_summary(report_data: ReportData) -> str:
+    findings_html = ""
     if report_data.key_findings:
-        pdf.chapter_title("关键发现", level=2)
-        for i, finding in enumerate(report_data.key_findings, 1):
-            pdf.set_font("NotoSans", "B", 10)
-            pdf.cell(0, 6, f"{i}. {finding[:120]}", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(2)
+        items = "\n".join(
+            f'<li>{_esc(f)}</li>' for f in report_data.key_findings
+        )
+        findings_html = f"""
+<h2>关键发现</h2>
+<ul>{items}</ul>
+"""
 
-    # ---- 3. Vulnerabilities ----
-    pdf.add_page()
-    pdf.chapter_title("发现的漏洞", level=1)
-    if not report_data.vulnerabilities:
-        pdf.body_text("未发现明显的可利用漏洞。")
-    else:
-        for idx, vuln in enumerate(report_data.vulnerabilities, 1):
-            sev_label = {
-                "high": "高危",
-                "medium": "中危",
-                "low": "低危",
-                "info": "信息",
-            }.get(vuln["severity"], vuln["severity"])
-            status_icon = "[已验证]" if vuln.get("result") else "[待验证]"
-            pdf.chapter_title(
-                f"{idx}. [{sev_label.upper()}] {vuln['name']} {status_icon}", level=2
-            )
-            pdf.info_table(
-                [
-                    (
-                        "漏洞类型",
-                        vuln["description"][:80] if vuln["description"] else "未分类",
-                    ),
-                    ("严重程度", sev_label),
-                    ("任务 ID", vuln.get("task_id", "")),
-                ]
-            )
-            if vuln.get("findings"):
-                pdf.set_font("NotoSans", "B", 10)
-                pdf.cell(0, 6, "关键发现:", new_x="LMARGIN", new_y="NEXT")
-                for f in vuln["findings"]:
-                    pdf.set_font("NotoSans", "", 10)
-                    pdf.safe_multi_cell(5, f"  • {f}")
-                pdf.ln(1)
-            if vuln.get("result"):
-                pdf.set_font("NotoSans", "B", 10)
-                pdf.cell(0, 6, "详细结果 / Payload:", new_x="LMARGIN", new_y="NEXT")
-                pdf.code_block(vuln["result"][:1500])
+    stats_html = ""
+    model_vulns = report_data.model_summary.get("vulnerabilities") or [] if report_data.model_summary else []
+    if model_vulns:
+        sev_counts = {"High": 0, "Medium": 0, "Low": 0, "Info": 0}
+        for mv in model_vulns:
+            s = mv.get("severity", "Info")
+            sev_counts[s] = sev_counts.get(s, 0) + 1
+        stats_rows = ""
+        for sev, count in sev_counts.items():
+            if count > 0:
+                label = _SEVERITY_LABELS.get(sev.lower(), sev)
+                stats_rows += f'<tr><td>{label}</td><td>{count}</td></tr>\n'
+        if stats_rows:
+            stats_html = f"""
+<h2>漏洞统计</h2>
+<table class="stat-table">
+  <thead><tr><th>严重程度</th><th>数量</th></tr></thead>
+  <tbody>{stats_rows}</tbody>
+</table>
+"""
 
-    # ---- 4. Safe tests ----
-    if report_data.safe_tests:
-        pdf.add_page()
-        pdf.chapter_title("已测试但未发现漏洞的项目", level=1)
-        headers = ["测试项目", "结果", "说明"]
-        rows = []
-        for st in report_data.safe_tests[:40]:
-            rows.append(
-                [
-                    st["name"][:30],
-                    st["result"][:20],
-                    st["note"][:50] if st["note"] else "—",
-                ]
-            )
-        pdf.stat_table(headers, rows)
+    recommendations_html = ""
+    if report_data.recommendations:
+        recs = "\n".join(
+            f'<div class="recommendation">{_esc(r)}</div>' for r in report_data.recommendations
+        )
+        recommendations_html = f"""
+<h2>修复建议</h2>
+{recs}
+"""
 
-    # ---- 5. Payloads ----
-    if report_data.payloads:
-        pdf.add_page()
-        pdf.chapter_title("利用成功的 Payload", level=1)
-        for idx, p in enumerate(report_data.payloads, 1):
-            sev_label = {
-                "high": "高危",
-                "medium": "中危",
-                "low": "低危",
-                "info": "信息",
-            }.get(p["severity"], p["severity"])
-            pdf.chapter_title(f"{idx}. [{sev_label}] {p['task_name']}", level=2)
-            pdf.code_block(p["payload"][:2000])
+    return f"""
+<div class="page-break">
+  <h1>风险总结</h1>
+  <div class="section">
+    <div style="white-space:pre-wrap; font-family:inherit;">{_esc(report_data.risk_summary())}</div>
+  </div>
+  {findings_html}
+  {stats_html}
+  {recommendations_html}
+</div>
+"""
 
-    # ---- 6. Endpoints ----
-    if report_data.endpoints:
-        pdf.add_page()
-        pdf.chapter_title("发现的 API 端点 / 路径", level=1)
-        headers = ["方法", "路径", "备注"]
-        rows = [
-            [e.get("method", ""), e["path"], e.get("note", "")]
-            for e in report_data.endpoints[:50]
-        ]
-        pdf.stat_table(headers, rows)
 
-    # ---- 7. Attack Chain ----
-    pdf.add_page()
-    pdf.chapter_title("利用链路 / 攻击图谱", level=1)
-    pdf.body_text("以下为本次渗透测试的任务执行链路（按依赖关系排序）:")
-    pdf.ln(2)
-    pdf.code_block(report_data.graph_text or "无任务数据")
-
-    # Task chain detail
-    pdf.chapter_title("任务执行详情", level=2)
+def _build_attack_graph(report_data: ReportData) -> str:
+    task_rows = ""
     for idx, t in enumerate(report_data.tasks, 1):
         status = t.get("status", "")
         name = t.get("name", "")
-        result = t.get("result") or ""
-        pdf.set_font("NotoSans", "B", 10)
-        pdf.cell(
-            0, 6, f"{idx}. [{status.upper()}] {name}", new_x="LMARGIN", new_y="NEXT"
+        task_rows += f'<tr><td>{idx}</td><td>{_esc(name[:60])}</td><td>{_esc(status.upper())}</td></tr>\n'
+
+    return f"""
+<div class="page-break">
+  <h1>攻击图谱</h1>
+  <p>以下为本次渗透测试的任务执行链路，展示了各任务的依赖关系和执行顺序。</p>
+  <div class="graph-block">{_esc(report_data.graph_text or "无任务数据")}</div>
+
+  <h2>任务执行摘要</h2>
+  <table class="stat-table">
+    <thead><tr><th>#</th><th>任务</th><th>状态</th></tr></thead>
+    <tbody>{task_rows}</tbody>
+  </table>
+</div>
+"""
+
+
+def _build_ai_report(report_data: ReportData) -> str:
+    model_vulns = []
+    if report_data.model_summary:
+        model_vulns = report_data.model_summary.get("vulnerabilities") or []
+
+    vuln_table_html = ""
+    vuln_cards_html = ""
+
+    if model_vulns:
+        vuln_rows = ""
+        for idx, mv in enumerate(model_vulns, 1):
+            vuln_rows += (
+                f'<tr>'
+                f'<td>{idx}</td>'
+                f'<td>{_esc(mv.get("name", "")[:50])}</td>'
+                f'<td>{_esc(mv.get("service", "")[:30])}</td>'
+                f'<td>{_badge(mv.get("severity", "Info").lower())}</td>'
+                f'</tr>\n'
+            )
+        vuln_table_html = f"""
+<h2>漏洞概览</h2>
+<table class="stat-table">
+  <thead><tr><th>#</th><th>漏洞名称</th><th>服务</th><th>严重程度</th></tr></thead>
+  <tbody>{vuln_rows}</tbody>
+</table>
+"""
+
+        for idx, mv in enumerate(model_vulns, 1):
+            name = mv.get("name", f"漏洞 {idx}")
+            sev = mv.get("severity", "Info").lower()
+            sev_label = _SEVERITY_LABELS.get(sev, sev)
+            bg = _SEVERITY_BG.get(sev, "#e2e3e5")
+
+            detail_rows = []
+            if mv.get("service"):
+                detail_rows.append(("服务", mv["service"]))
+            if mv.get("url"):
+                detail_rows.append(("URL", mv["url"]))
+            if mv.get("type"):
+                detail_rows.append(("类型", mv["type"]))
+            detail_rows.append(("严重程度", sev_label))
+            if mv.get("remediation"):
+                detail_rows.append(("修复建议", mv["remediation"]))
+
+            details = "\n".join(
+                f"<tr><td>{_esc(k)}</td><td>{_esc(v)}</td></tr>" for k, v in detail_rows
+            )
+
+            payload_html = ""
+            if mv.get("payload"):
+                payload_html = f"""
+<p><strong>Payload / PoC:</strong></p>
+<pre>{_esc(mv["payload"])}</pre>
+"""
+
+            vuln_cards_html += f"""
+<div class="vuln-card" style="border-left: 4px solid {_SEVERITY_COLORS.get(sev, '#6c757d')}; background: {bg};">
+  <h3>{idx}. [{sev_label.upper()}] {_esc(name)}</h3>
+  <table class="info-table">
+    <tbody>{details}</tbody>
+  </table>
+  {payload_html}
+</div>
+"""
+
+    markdown_html = ""
+    if report_data.model_markdown:
+        md = markdown.markdown(
+            report_data.model_markdown,
+            extensions=["tables", "fenced_code"],
         )
-        if result:
-            pdf.set_font("NotoSans", "", 9)
-            snippet = result.strip()[:300].replace("\n", " ")
-            pdf.safe_multi_cell(5, f"   结果: {snippet}")
-        pdf.ln(1)
+        # Wrap tables for break-inside styling
+        md = md.replace("<table>", '<table class="stat-table">')
+        markdown_html = f"""
+<h2>详细报告</h2>
+<div class="markdown-content">
+{md}
+</div>
+"""
 
-    # ---- 8. Recommendations ----
-    pdf.add_page()
-    pdf.chapter_title("渗透建议", level=1)
-    if report_data.recommendations:
-        for rec in report_data.recommendations:
-            pdf.set_font("NotoSans", "", 10)
-            pdf.cell(0, 6, f"• {rec}", new_x="LMARGIN", new_y="NEXT")
-    else:
-        pdf.body_text("暂无具体建议。")
+    return f"""
+<div class="page-break">
+  <h1>AI 渗透测试报告</h1>
+  <p>以下为 AI 引擎在任务完成后自动生成的详细渗透测试报告，包含漏洞详情、利用证据、Payload、修复建议等完整内容。</p>
+  {vuln_table_html}
+  {vuln_cards_html}
+  {markdown_html}
+</div>
+"""
 
-    # ---- 9. Stats ----
-    pdf.chapter_title("漏洞统计", level=1)
-    high = sum(1 for v in report_data.vulnerabilities if v["severity"] == "high")
-    medium = sum(1 for v in report_data.vulnerabilities if v["severity"] == "medium")
-    low = sum(1 for v in report_data.vulnerabilities if v["severity"] == "low")
-    safe = len(report_data.safe_tests)
-    headers = ["严重程度", "数量"]
-    rows = [
-        ["高危", str(high)],
-        ["中危", str(medium)],
-        ["低危", str(low)],
-        ["安全测试通过", str(safe)],
-    ]
-    pdf.stat_table(headers, rows)
 
-    buf = BytesIO()
-    pdf.output(buf)
-    return buf.getvalue()
+def _build_styles() -> str:
+    return """
+<style>
+  /* ---------- Base ---------- */
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: "Noto Sans CJK SC", "WenQuanYi Micro Hei", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.6;
+    color: #333;
+  }
+
+  /* ---------- Cover ---------- */
+  .cover {
+    text-align: center;
+    padding-top: 120px;
+    page-break-after: always;
+  }
+  .cover-icon { font-size: 64pt; margin-bottom: 30px; }
+  .cover-title { font-size: 32pt; font-weight: bold; color: #222; margin-bottom: 16px; }
+  .cover-subtitle { font-size: 16pt; color: #555; margin-bottom: 40px; }
+  .cover-meta { font-size: 11pt; color: #666; line-height: 2.2; }
+  .cover-meta p { margin: 4px 0; }
+  .cover-risk { font-size: 18pt; font-weight: bold; margin-top: 30px; }
+
+  /* ---------- Typography ---------- */
+  h1 {
+    font-size: 20pt;
+    color: #dc3545;
+    border-bottom: 2px solid #dc3545;
+    padding-bottom: 8px;
+    margin-top: 0;
+    page-break-after: avoid;
+  }
+  h2 {
+    font-size: 14pt;
+    color: #333;
+    margin-top: 24px;
+    page-break-after: avoid;
+  }
+  h3 {
+    font-size: 12pt;
+    color: #444;
+    margin-top: 16px;
+    page-break-after: avoid;
+  }
+  p { margin: 8px 0; }
+
+  /* ---------- Layout ---------- */
+  .page-break { page-break-before: always; }
+  .section { margin-bottom: 20px; }
+
+  /* ---------- Tables ---------- */
+  .info-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+  }
+  .info-table td {
+    border: 1px solid #ddd;
+    padding: 8px 12px;
+  }
+  .info-table td:first-child {
+    background: #f8f9fa;
+    font-weight: bold;
+    width: 30%;
+    color: #444;
+  }
+
+  .stat-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    break-inside: avoid;
+  }
+  .stat-table th {
+    background: #dc3545;
+    color: white;
+    font-weight: bold;
+    padding: 8px 12px;
+    text-align: left;
+    border: 1px solid #dc3545;
+  }
+  .stat-table td {
+    border: 1px solid #ddd;
+    padding: 8px 12px;
+  }
+  .stat-table tr:nth-child(even) { background: #f8f9fa; }
+
+  /* ---------- Badges ---------- */
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-size: 9pt;
+    font-weight: bold;
+    color: white;
+  }
+
+  /* ---------- Code ---------- */
+  pre {
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 12px;
+    font-family: "JetBrains Mono", "Fira Code", "Consolas", "Courier New", monospace;
+    font-size: 9pt;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 10px 0;
+    break-inside: avoid;
+  }
+  code {
+    background: #f5f5f5;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-family: "JetBrains Mono", "Fira Code", "Consolas", "Courier New", monospace;
+    font-size: 9pt;
+  }
+
+  /* ---------- Vulnerability cards ---------- */
+  .vuln-card {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 16px;
+    margin: 16px 0;
+    break-inside: avoid;
+  }
+  .vuln-card h3 { margin-top: 0; font-size: 12pt; }
+
+  /* ---------- Graph block ---------- */
+  .graph-block {
+    background: #f8f9fa;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 12px;
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    font-size: 9pt;
+    white-space: pre-wrap;
+    break-inside: avoid;
+  }
+
+  /* ---------- Lists ---------- */
+  ul, ol { margin: 8px 0; padding-left: 24px; }
+  li { margin: 4px 0; }
+
+  /* ---------- Markdown content overrides ---------- */
+  .markdown-content h1 { font-size: 16pt; }
+  .markdown-content h2 { font-size: 13pt; }
+  .markdown-content h3 { font-size: 11pt; }
+  .markdown-content pre { break-inside: avoid; }
+  .markdown-content table { break-inside: avoid; }
+
+  /* ---------- Recommendations ---------- */
+  .recommendation {
+    background: #d1ecf1;
+    border-left: 4px solid #17a2b8;
+    padding: 10px 14px;
+    margin: 8px 0;
+    break-inside: avoid;
+    border-radius: 0 4px 4px 0;
+  }
+</style>
+"""
+
+
+def render_report_html(report_data: ReportData) -> str:
+    """Render a ReportData instance into a complete HTML document."""
+    cover = _build_cover(report_data)
+    basic_info = _build_basic_info(report_data)
+    risk_summary = _build_risk_summary(report_data)
+    attack_graph = _build_attack_graph(report_data)
+    ai_report = _build_ai_report(report_data)
+    styles = _build_styles()
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>渗透测试报告 - {_esc(report_data.session.get("title") or "未命名目标")}</title>
+{styles}
+</head>
+<body>
+{cover}
+{basic_info}
+{risk_summary}
+{attack_graph}
+{ai_report}
+</body>
+</html>
+"""
+
+
+# ---------------------------------------------------------------------------
+# PDF generation (async)
+# ---------------------------------------------------------------------------
+
+
+_HEADER_TEMPLATE = """<div style="font-size:9px; width:100%; margin:0 auto; padding:0 5mm;">
+  <table style="width:100%; border:none;">
+    <tr>
+      <td style="text-align:left; border:none; color:#888;">Ion 渗透测试报告</td>
+      <td style="text-align:right; border:none; color:#888;">第 <span class="pageNumber"></span> 页 / 共 <span class="totalPages"></span> 页</td>
+    </tr>
+  </table>
+</div>"""
+
+_FOOTER_TEMPLATE = """<div style="font-size:8px; text-align:center; width:100%; color:#aaa;">
+  生成时间: {generated_at}
+</div>"""
+
+
+async def generate_pdf(report_data: ReportData, output_path: str | Path) -> Path:
+    """Generate a PDF file from *report_data* and write it to *output_path*.
+
+    Returns the Path to the generated PDF.
+    """
+    html = render_report_html(report_data)
+    renderer = get_pdf_renderer()
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    result = await renderer.render(
+        html,
+        output_path=output_path,
+        margin={"top": "18mm", "bottom": "18mm", "left": "15mm", "right": "15mm"},
+        header_template=_HEADER_TEMPLATE,
+        footer_template=_FOOTER_TEMPLATE.format(generated_at=generated_at),
+    )
+    if isinstance(result, Path):
+        return result
+    # Fallback: write bytes ourselves if render returned bytes
+    path = Path(output_path)
+    path.write_bytes(result)
+    return path
