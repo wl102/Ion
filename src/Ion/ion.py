@@ -8,6 +8,7 @@ from typing import Any, Optional, Literal
 
 from pydantic import BaseModel
 from Ion.tools.registry import dispatch
+from Ion.compat import adapt_messages_for_model, get_stream_create_kwargs
 from Ion.subagent_models import (
     Budget,
     StopConditions,
@@ -265,22 +266,26 @@ def run_one_turn(
     prefix_printed = False
     message_id: str | None = None
 
+    # Provider-specific message adaptations (e.g. MiniMax rejects system role)
+    api_messages = adapt_messages_for_model(state.messages, model_id)
+
     _ctx_token = _active_callbacks_ctx.set(callbacks)
     try:
         # Try streaming with usage; fall back if provider doesn't support stream_options.
         try:
-            response = client.chat.completions.create(
-                model=model_id,
-                messages=state.messages,
-                tools=tools,
-                tool_choice="auto",
-                stream=True,
-                stream_options={"include_usage": True},
-            )
+            create_kwargs = {
+                "model": model_id,
+                "messages": api_messages,
+                "tools": tools,
+                "tool_choice": "auto",
+                "stream": True,
+                **get_stream_create_kwargs(model_id),
+            }
+            response = client.chat.completions.create(**create_kwargs)
         except Exception:
             response = client.chat.completions.create(
                 model=model_id,
-                messages=state.messages,
+                messages=api_messages,
                 tools=tools,
                 tool_choice="auto",
                 stream=True,
@@ -292,6 +297,7 @@ def run_one_turn(
         finish_reason = None
         usage = None
         reasoning = False
+        reasoning_buffer = ""
 
         for chunk in response:
             if message_id is None and hasattr(chunk, "id") and chunk.id:
@@ -357,6 +363,28 @@ def run_one_turn(
                     cb = callbacks.get("on_assistant_chunk")
                     if cb:
                         cb(text, reasoning=True, message_id=message_id, agent_name=agent_name)
+
+            # MiniMax reasoning_split returns cumulative text inside reasoning_details
+            if delta and hasattr(delta, "reasoning_details") and delta.reasoning_details:
+                for detail in delta.reasoning_details:
+                    if isinstance(detail, dict) and "text" in detail:
+                        full_text = detail["text"] or ""
+                        if len(full_text) > len(reasoning_buffer):
+                            text = full_text[len(reasoning_buffer):]
+                            reasoning_buffer = full_text
+                            if text:
+                                if prefix and not prefix_printed:
+                                    _vprint(verbose, prefix, end="", flush=True)
+                                    prefix_printed = True
+                                reasoning_content_parts.append(text)
+                                if not reasoning:
+                                    reasoning = True
+                                    _vprint(verbose, "<think>\n")
+                                _vprint(verbose, text, end="", flush=True)
+                                if callbacks:
+                                    cb = callbacks.get("on_assistant_chunk")
+                                    if cb:
+                                        cb(text, reasoning=True, message_id=message_id, agent_name=agent_name)
 
             if choice.finish_reason is not None:
                 finish_reason = choice.finish_reason

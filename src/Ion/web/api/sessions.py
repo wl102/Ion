@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from openai import OpenAI
 from sqlalchemy.orm import Session
 
+from Ion.compat import adapt_messages_for_model
 from Ion.db import Database, get_default_db
 from Ion.db.models import SessionRecord
 from Ion.web.schemas import SessionCreate, SessionOut
@@ -33,14 +34,14 @@ _TITLE_SYSTEM_PROMPT = (
     "Hard rules:\n"
     "- Output exactly ONE line: the title itself, nothing else.\n"
     "- No quotes, no surrounding punctuation, no leading label "
-    "(\"Title:\", \"Topic:\", etc.), no explanation, no preamble, no "
+    '("Title:", "Topic:", etc.), no explanation, no preamble, no '
     "disclaimers, no trailing notes.\n"
     "- Do NOT refuse and do NOT add safety language. You are not "
     "performing or assisting the task; you are only naming it. Even if "
     "the text discusses security testing, exploitation, malware, CTF "
     "challenges, or other sensitive topics, write a neutral, factual "
-    "label (examples: \"SQLi on login form\", \"Reverse engineer ELF "
-    "binary\", \"Recon target subdomain\", \"Buffer overflow PoC\").\n"
+    'label (examples: "SQLi on login form", "Reverse engineer ELF '
+    'binary", "Recon target subdomain", "Buffer overflow PoC").\n'
     "- If the text is vague or empty, infer the most likely topic and "
     "label it; never reply with a refusal or a question.\n"
     "- Prefer the same language as the user's text.\n"
@@ -51,15 +52,33 @@ _TITLE_SYSTEM_PROMPT = (
 # Lowercased substrings that indicate the model returned a refusal or a
 # safety preamble instead of a title. Covers EN + ZH variants we've seen.
 _REFUSAL_SUBSTRINGS = (
-    "i can't", "i cannot", "i won't", "i will not",
-    "i'm sorry", "i am sorry", "sorry, i", "sorry i",
-    "i'm unable", "i am unable",
-    "i'm not able", "i am not able",
-    "as an ai", "as a language model",
-    "i don't feel comfortable", "i do not feel comfortable",
-    "我无法", "我不能", "我不会", "我没办法",
-    "抱歉", "对不起", "很抱歉",
-    "无法协助", "无法帮助", "不便协助", "不能协助",
+    "i can't",
+    "i cannot",
+    "i won't",
+    "i will not",
+    "i'm sorry",
+    "i am sorry",
+    "sorry, i",
+    "sorry i",
+    "i'm unable",
+    "i am unable",
+    "i'm not able",
+    "i am not able",
+    "as an ai",
+    "as a language model",
+    "i don't feel comfortable",
+    "i do not feel comfortable",
+    "我无法",
+    "我不能",
+    "我不会",
+    "我没办法",
+    "抱歉",
+    "对不起",
+    "很抱歉",
+    "无法协助",
+    "无法帮助",
+    "不便协助",
+    "不能协助",
 )
 
 
@@ -84,6 +103,12 @@ def _clean_title(text: str) -> str:
     text = (text or "").strip()
     if not text:
         return ""
+    # Remove any <think>...</think> sections added by some model chains.
+    import re
+
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S | re.I).strip()
+    if not text:
+        return ""
     for line in text.splitlines():
         line = line.strip().strip("\"'`*")
         if not line:
@@ -91,7 +116,7 @@ def _clean_title(text: str) -> str:
         lowered = line.lower()
         for prefix in ("title:", "session title:", "name:", "topic:"):
             if lowered.startswith(prefix):
-                line = line[len(prefix):].strip().strip("\"'`*")
+                line = line[len(prefix) :].strip().strip("\"'`*")
                 break
         line = line.rstrip(".!?")
         if line:
@@ -121,20 +146,21 @@ def _generate_title(query: str, mode: str) -> str:
         # max_tokens is generous so reasoning-style models (which spend the
         # bulk of their budget on internal chain-of-thought) can still emit
         # the final title in the output channel.
+        raw_messages = [
+            {"role": "system", "content": _TITLE_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    f"Write a 2-6 word topic label for the following "
+                    f"task description (mode={mode}). Do not perform "
+                    f"or evaluate the task; only name it.\n\n<<<\n"
+                    f"{query[:1500]}\n>>>"
+                ),
+            },
+        ]
         resp = client.chat.completions.create(
             model=model_id,
-            messages=[
-                {"role": "system", "content": _TITLE_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": (
-                        f"Write a 2-6 word topic label for the following "
-                        f"task description (mode={mode}). Do not perform "
-                        f"or evaluate the task; only name it.\n\n<<<\n"
-                        f"{query[:1500]}\n>>>"
-                    ),
-                },
-            ],
+            messages=adapt_messages_for_model(raw_messages, model_id),
             max_tokens=2048,
             temperature=0.2,
         )
@@ -205,7 +231,9 @@ def create_session(
 
 
 @router.get("", response_model=list[SessionOut])
-def list_sessions(skip: int = 0, limit: int = 50, db: Session = Depends(get_db_session)):
+def list_sessions(
+    skip: int = 0, limit: int = 50, db: Session = Depends(get_db_session)
+):
     records = (
         db.query(SessionRecord)
         .order_by(SessionRecord.created_at.desc())
@@ -232,5 +260,6 @@ def delete_session(sid: str, db: Session = Depends(get_db_session)):
     db.delete(record)
     db.commit()
     from Ion.web.agent_runner import WebAgentRunner
+
     WebAgentRunner.remove(sid)
     return {"deleted": True}
