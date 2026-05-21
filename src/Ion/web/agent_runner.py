@@ -132,22 +132,37 @@ class WebAgentRunner:
     #  Broadcast helpers                                                 #
     # ------------------------------------------------------------------ #
 
-    def _broadcast_event(self, event: dict[str, Any]) -> None:
+    def _broadcast_event(self, event: dict[str, Any], sync: bool = False) -> None:
         """Send an event to all connected SSE consumers.
 
         Called from the agent background thread; uses run_coroutine_threadsafe
         so that Queue.put runs on the event-loop thread.
+
+        When *sync* is True, the method blocks until every queue has actually
+        received the event (or a short timeout expires). This prevents a race
+        where ``self._done`` becomes True while the final ``done``/``error``
+        event is still in-flight and has not yet landed in the consumer queues.
         """
         loop = self._main_loop
         if loop is None:
             return
         with self._sse_queues_lock:
             queues = list(self._sse_queues)
+        if not queues:
+            return
+        futures = []
         for q in queues:
             try:
-                asyncio.run_coroutine_threadsafe(q.put(event), loop)
+                fut = asyncio.run_coroutine_threadsafe(q.put(event), loop)
+                futures.append(fut)
             except Exception:
                 pass
+        if sync and futures:
+            for fut in futures:
+                try:
+                    fut.result(timeout=2.0)
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------ #
     #  Persistence helpers                                               #
@@ -448,12 +463,12 @@ class WebAgentRunner:
                 pause_check=pause_check,
                 initial_messages=messages,
             )
-            self._broadcast_event({"type": "done", "payload": result})
+            self._broadcast_event({"type": "done", "payload": result}, sync=True)
         except Exception as exc:
             import traceback
             err = f"{exc}\n{traceback.format_exc()}"
             print(f"[AGENT ERROR] {err}")
-            self._broadcast_event({"type": "error", "payload": err})
+            self._broadcast_event({"type": "error", "payload": err}, sync=True)
         finally:
             self._done = True
 
