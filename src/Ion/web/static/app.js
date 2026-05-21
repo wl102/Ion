@@ -88,6 +88,15 @@
     return svg.replace(/^<svg /, '<svg width="14" height="14" ');
   }
 
+  // ---- i18n helpers ----
+  function t(key, ...args) {
+    return window.i18n ? window.i18n.t(key, ...args) : key;
+  }
+
+  function statusLabel(status) {
+    return t(`status.${status}`) || status;
+  }
+
   // ---- API Client ----
   async function api(path, opts = {}) {
     const res = await fetch(`${API}${path}`, {
@@ -109,17 +118,17 @@
 
   function renderSessionList() {
     if (sessions.length === 0) {
-      sessionList.innerHTML = '<div class="session-empty">No sessions yet</div>';
+      sessionList.innerHTML = `<div class="session-empty">${t('session.empty')}</div>`;
       return;
     }
     sessionList.innerHTML = sessions.map(s => `
       <div class="session-item${s.id === currentSid ? ' active' : ''}" data-sid="${s.id}" data-status="${s.status}">
         <div class="session-icon"></div>
         <div class="session-info">
-          <div class="session-title">${esc(s.title || 'Untitled')}</div>
-          <div class="session-meta">${s.mode} · ${s.status}</div>
+          <div class="session-title">${esc(s.title || t('session.untitled'))}</div>
+          <div class="session-meta">${s.mode} · ${statusLabel(s.status)}</div>
         </div>
-        <button class="session-delete" data-sid="${s.id}" title="Delete">
+        <button class="session-delete" data-sid="${s.id}" title="${t('session.delete')}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
         </button>
       </div>
@@ -168,7 +177,7 @@
         if (idx >= 0) sessions[idx] = fresh;
         if (currentSid === sid) {
           currentSession = fresh;
-          topbarTitle.textContent = fresh.title || 'EXPLOIT CHAIN ATLAS';
+          topbarTitle.textContent = fresh.title || t('atlas.header');
         }
         renderSessionList();
         // Stop polling once the title has changed away from the placeholder.
@@ -180,7 +189,7 @@
   }
 
   async function deleteSession(sid) {
-    if (!confirm('Delete this session?')) return;
+    if (!confirm(t('session.deleteConfirm'))) return;
     await api(`/api/sessions/${sid}`, { method: 'DELETE' });
     if (currentSid === sid) {
       currentSid = null;
@@ -190,7 +199,7 @@
       showWelcome();
     }
     await loadSessions();
-    toast('Session deleted', 'success');
+    toast(t('session.deleted'), 'success');
   }
 
   async function selectSession(sid) {
@@ -205,7 +214,7 @@
 
     welcome.classList.add('hidden');
     sessionView.classList.remove('hidden');
-    topbarTitle.textContent = session.title || 'EXPLOIT CHAIN ATLAS';
+    topbarTitle.textContent = session.title || t('atlas.header');
     topbarSubtitle.textContent = `${(session.mode || 'general').toUpperCase()} • SID ${session.id}`;
     chatHeaderMeta.textContent = `SID ${session.id}`;
     updateStatus(session.status);
@@ -230,7 +239,7 @@
   }
 
   function updateStatus(status) {
-    topbarStatus.textContent = status;
+    topbarStatus.textContent = statusLabel(status);
     topbarStatus.dataset.status = status;
     isRunning = status === 'running';
     isPaused = status === 'paused';
@@ -240,21 +249,21 @@
 
   function updateAtlasState(status) {
     const map = {
-      idle: 'SYSTEM IDLE',
-      running: 'EXECUTING…',
-      paused: 'PAUSED — AWAITING INPUT',
-      completed: 'COMPROMISE COMPLETE',
-      error: 'EXECUTION FAILED',
+      idle: t('atlas.footer.state.idle'),
+      running: t('atlas.footer.state.running'),
+      paused: t('atlas.footer.state.paused'),
+      completed: t('atlas.footer.state.completed'),
+      error: t('atlas.footer.state.error'),
     };
     statState.textContent = map[status] || status.toUpperCase();
     statDot.dataset.state = status;
 
     const headerMap = {
-      idle: 'PLANNING…',
-      running: 'EXECUTING NODES',
-      paused: 'PAUSED',
-      completed: 'ROOT ACCESS ACQUIRED',
-      error: 'EXECUTION ABORTED',
+      idle: t('atlas.state.planning'),
+      running: t('atlas.state.executing'),
+      paused: t('atlas.state.paused'),
+      completed: t('atlas.state.completed'),
+      error: t('atlas.state.aborted'),
     };
     atlasHeaderRight.textContent = headerMap[status] || status.toUpperCase();
     atlasHeaderRight.dataset.state = status;
@@ -288,7 +297,7 @@
     welcomeQuery.disabled = false;
     welcomeMode.disabled = false;
     btnWelcomeSubmit.disabled = false;
-    welcomeSubmitLabel.textContent = 'Start Session';
+    welcomeSubmitLabel.textContent = t('welcome.start');
   }
 
   function setWelcomeBusy(busy) {
@@ -296,14 +305,14 @@
     welcomeQuery.disabled = busy;
     welcomeMode.disabled = busy;
     btnWelcomeSubmit.disabled = busy;
-    welcomeSubmitLabel.textContent = busy ? 'Creating session…' : 'Start Session';
+    welcomeSubmitLabel.textContent = busy ? t('welcome.creating') : t('welcome.start');
   }
 
   async function startSessionFromWelcome() {
     const query = welcomeQuery.value.trim();
     const mode = welcomeMode.value || 'general';
     if (!query) {
-      toast('Please describe your task first', 'error');
+      toast(t('welcome.taskFirst'), 'error');
       welcomeQuery.focus();
       return;
     }
@@ -313,7 +322,7 @@
     try {
       session = await createSession('', mode, query);
     } catch (err) {
-      toast(err.message || 'Failed to create session', 'error');
+      toast(err.message || t('welcome.createFailed'), 'error');
       setWelcomeBusy(false);
       return;
     }
@@ -332,7 +341,7 @@
     queryInput.disabled = true;
     btnRun.classList.add('hidden');
     btnInterrupt.classList.remove('hidden');
-    inputHint.textContent = 'Agent is running — click interrupt to pause';
+    inputHint.textContent = t('chat.hint.running');
   }
 
   function showIdleUI() {
@@ -341,7 +350,7 @@
     queryInput.disabled = false;
     btnRun.classList.remove('hidden');
     btnInterrupt.classList.add('hidden');
-    inputHint.textContent = 'Shift+Enter for newline';
+    inputHint.textContent = t('chat.hint.newline');
     queryInput.focus();
   }
 
@@ -351,7 +360,7 @@
     queryInput.disabled = false;
     btnRun.classList.remove('hidden');
     btnInterrupt.classList.add('hidden');
-    inputHint.textContent = 'Agent paused — send a message to continue';
+    inputHint.textContent = t('chat.hint.paused');
     queryInput.focus();
   }
 
@@ -446,7 +455,7 @@
       case 'subagent_start':
         appendMessage(
           'system',
-          `→ 转交至子代理: ${evt.agent_name} — ${evt.payload || ''}`,
+          `${t('subagent.handoffIn')}${evt.agent_name} — ${evt.payload || ''}`,
           { agentName: evt.agent_name, handoff: 'in' }
         );
         break;
@@ -456,7 +465,7 @@
         const tail = p.summary ? `: ${p.summary}` : '';
         appendMessage(
           'system',
-          `← ${evt.agent_name} 完成 (${p.status || ''})${tail}`,
+          `${t('subagent.handoffOut')} ${evt.agent_name} (${p.status || ''})${tail}`,
           { agentName: evt.agent_name, handoff: 'out' }
         );
         break;
@@ -467,7 +476,7 @@
         break;
 
       case 'done':
-        appendMessage('system', evt.payload || 'Task completed');
+        appendMessage('system', evt.payload || t('status.completed'));
         updateStatus('completed');
         showIdleUI();
         disconnectSSE();
@@ -510,7 +519,7 @@
 
     const div = document.createElement('div');
     div.className = `msg msg-${role}`;
-    const labelMap = { user: 'you', assistant: 'agent', system: 'system', error: 'error' };
+    const labelMap = { user: t('chat.label.you'), assistant: t('chat.label.agent'), system: t('chat.label.system'), error: t('chat.label.error') };
     const isSubagent = opts.agentName && opts.agentName !== 'root';
     const label = isSubagent ? opts.agentName : (labelMap[role] || role);
     if (opts.agentName) div.dataset.agent = opts.agentName;
@@ -534,7 +543,7 @@
     bubble.className = 'msg msg-assistant';
     bubble.dataset.messageId = safeId;
     const isSubagent = agentName && agentName !== 'root';
-    const label = isSubagent ? agentName : 'agent';
+    const label = isSubagent ? agentName : t('chat.label.agent');
     if (agentName) bubble.dataset.agent = agentName;
     bubble.innerHTML = `
       <div class="msg-label">${esc(label)}</div>
@@ -560,7 +569,7 @@
     det.innerHTML = `
       <summary class="msg-thinking-summary">
         <span class="msg-thinking-chevron">▾</span>
-        <span class="msg-thinking-title">thinking</span>
+        <span class="msg-thinking-title">${t('chat.thinking')}</span>
       </summary>
       <div class="msg-thinking-body"></div>
     `;
@@ -607,9 +616,9 @@
       det.dataset.toolName = name;
       det.dataset.pending = '1';
       if (opts.agentName) det.dataset.agent = opts.agentName;
-      det.innerHTML = renderToolSummary(name, 'running…') + `
+      det.innerHTML = renderToolSummary(name, t('status.running') + '…') + `
         <div class="msg-tool-body">
-          <div class="msg-tool-result msg-tool-result-empty">Awaiting result…</div>
+          <div class="msg-tool-result msg-tool-result-empty">${t('chat.tool.awaiting')}</div>
         </div>
       `;
       messages.appendChild(det);
@@ -635,11 +644,11 @@
       if (opts.agentName && !det.dataset.agent) det.dataset.agent = opts.agentName;
     }
     const dur = det.querySelector('.msg-tool-duration');
-    if (dur) dur.textContent = durationMs ? `${Math.round(durationMs)}ms` : 'done';
+    if (dur) dur.textContent = durationMs ? `${Math.round(durationMs)}ms` : t('chat.tool.done');
     const body = det.querySelector('.msg-tool-body');
     if (body) {
       const text = (result === null || result === undefined || result === '')
-        ? '(no output)'
+        ? t('chat.tool.noOutput')
         : (typeof result === 'string' ? result : String(result));
       const truncResult = text.length > 2000
         ? text.slice(0, 2000) + '\n…(truncated)'
@@ -895,17 +904,17 @@
     const attempts = t.attempt_count || 0;
     const maxAttempts = t.max_attempts || 1;
     if (attempts === 0) {
-      tags.push(`<span class="atlas-node-tag">${ICON.info}AUTO_SCAN</span>`);
+      tags.push(`<span class="atlas-node-tag">${ICON.info}${t('node.autoScan')}</span>`);
     } else {
-      tags.push(`<span class="atlas-node-tag">${ICON.info}ATTEMPT_${attempts}/${maxAttempts}</span>`);
+      tags.push(`<span class="atlas-node-tag">${ICON.info}${t('node.attempt')}_${attempts}/${maxAttempts}</span>`);
     }
     if (t.intelligence_source) {
-      tags.push(`<span class="atlas-node-tag atlas-node-tag-info">${ICON.shield}INTEL: ${esc(t.intelligence_source).slice(0, 24)}</span>`);
+      tags.push(`<span class="atlas-node-tag atlas-node-tag-info">${ICON.shield}${t('node.intel')}${esc(t.intelligence_source).slice(0, 24)}</span>`);
     }
     if (status === 'failed' || status === 'killed') {
-      tags.push(`<span class="atlas-node-tag atlas-node-tag-warn">${ICON.alert}${status.toUpperCase()}</span>`);
+      tags.push(`<span class="atlas-node-tag atlas-node-tag-warn">${ICON.alert}${statusLabel(status).toUpperCase()}</span>`);
     } else if (/H3|EXPLOIT|RCE|SHELL|PRIV/.test((t.name || '').toUpperCase())) {
-      tags.push(`<span class="atlas-node-tag atlas-node-tag-warn">${ICON.alert}CRITICAL_VULN</span>`);
+      tags.push(`<span class="atlas-node-tag atlas-node-tag-warn">${ICON.alert}${t('node.critical')}</span>`);
     }
 
     return `
@@ -915,10 +924,10 @@
             <div class="atlas-node-icon">${pickTaskIcon(t.name)}</div>
             <div class="atlas-node-content">
               <div class="atlas-node-meta-row">
-                <span class="atlas-node-status">${esc(status)}</span>
+                <span class="atlas-node-status">${esc(statusLabel(status))}</span>
                 <span class="atlas-node-id">ID: ${esc(idShort)}</span>
               </div>
-              <h3 class="atlas-node-title">${esc(t.name || 'Untitled task')}</h3>
+              <h3 class="atlas-node-title">${esc(t.name || t('node.untitled'))}</h3>
               <p class="atlas-node-desc">${esc(t.description || '')}</p>
               <div class="atlas-node-tags">${tags.join('')}</div>
             </div>
@@ -939,12 +948,12 @@
       <div class="atlas-root">
         <div class="atlas-root-circle">${ICON.unlock}</div>
         <div style="text-align:center;">
-          <div class="atlas-root-label">ACCESS_LEVEL: 0</div>
-          <div class="atlas-root-title">Root Acquired</div>
+          <div class="atlas-root-label">${t('node.root.accessLevel')}</div>
+          <div class="atlas-root-title">${t('node.root.title')}</div>
         </div>
         <button class="atlas-root-download" type="button">
           ${ICON.download}
-          Download Exploit Report
+          ${t('node.root.download')}
         </button>
       </div>
     `;
@@ -952,8 +961,8 @@
 
   // ---- Detail Panel ----
   function showDetail(taskId, opts = {}) {
-    const t = tasks.find(x => x.id === taskId);
-    if (!t) return;
+    const task = tasks.find(x => x.id === taskId);
+    if (!task) return;
     selectedTaskId = taskId;
 
     // Highlight active node
@@ -961,10 +970,10 @@
       el.classList.toggle('active', el.dataset.id === taskId);
     });
 
-    const status = t.status || 'pending';
-    const updated = t.updated_at ? new Date(t.updated_at).toLocaleString() : '—';
-    const created = t.created_at ? new Date(t.created_at).toLocaleString() : '—';
-    const depend_on = Array.isArray(t.depend_on) ? t.depend_on : [];
+    const status = task.status || 'pending';
+    const updated = task.updated_at ? new Date(task.updated_at).toLocaleString() : '—';
+    const created = task.created_at ? new Date(task.created_at).toLocaleString() : '—';
+    const depend_on = Array.isArray(task.depend_on) ? task.depend_on : [];
 
     const chipClass = {
       completed: 'atlas-detail-chip-ok',
@@ -978,62 +987,62 @@
                    : status === 'running' ? ICON.zap
                    : ICON.clock;
 
-    const resultBlock = t.result
-      ? `<pre class="atlas-detail-result"># cat execution_log.txt\n${esc(t.result)}</pre>`
-      : `<div class="atlas-detail-result atlas-detail-result-empty">No result captured yet.</div>`;
+    const resultBlock = task.result
+      ? `<pre class="atlas-detail-result"># cat execution_log.txt\n${esc(task.result)}</pre>`
+      : `<div class="atlas-detail-result atlas-detail-result-empty">${t('detail.noResult')}</div>`;
 
     const depsBlock = depend_on.length
       ? `<div class="atlas-detail-deps">${depend_on.map(d => `
           <div class="atlas-detail-dep">${ICON.check}<span class="atlas-detail-dep-text">${esc(d)}</span></div>
         `).join('')}</div>`
-      : `<div class="atlas-detail-empty">No prerequisites (root task)</div>`;
+      : `<div class="atlas-detail-empty">${t('detail.noPrereq')}</div>`;
 
     atlasDetailBody.innerHTML = `
       <div>
-        <h3 class="atlas-detail-title">${esc(t.name || 'Untitled')}</h3>
+        <h3 class="atlas-detail-title">${esc(task.name || t('session.untitled'))}</h3>
         <div class="atlas-detail-chips">
-          <span class="atlas-detail-chip ${chipClass}">${chipIcon}${esc(status.toUpperCase())}</span>
-          <span class="atlas-detail-chip">UPDATED ${esc(updated)}</span>
+          <span class="atlas-detail-chip ${chipClass}">${chipIcon}${esc(statusLabel(status).toUpperCase())}</span>
+          <span class="atlas-detail-chip">${t('detail.updated')} ${esc(updated)}</span>
         </div>
       </div>
 
       <div class="atlas-detail-section">
-        <div class="atlas-detail-section-label">${ICON.info}DESCRIPTION</div>
-        <div style="font-size:12px; color:var(--text-muted); line-height:1.6;">${esc(t.description || '—')}</div>
+        <div class="atlas-detail-section-label">${ICON.info}${t('detail.description')}</div>
+        <div style="font-size:12px; color:var(--text-muted); line-height:1.6;">${esc(task.description || '—')}</div>
       </div>
 
       <div class="atlas-detail-section">
-        <div class="atlas-detail-section-label">${ICON.terminal}PAYLOAD_OUTPUT</div>
+        <div class="atlas-detail-section-label">${ICON.terminal}${t('detail.payload')}</div>
         ${resultBlock}
       </div>
 
       <div class="atlas-detail-grid">
         <div class="atlas-detail-stat">
-          <div class="atlas-detail-stat-label">Attempts</div>
-          <div class="atlas-detail-stat-value">${t.attempt_count || 0} / ${t.max_attempts || 1}</div>
+          <div class="atlas-detail-stat-label">${t('detail.attempts')}</div>
+          <div class="atlas-detail-stat-value">${task.attempt_count || 0} / ${task.max_attempts || 1}</div>
         </div>
         <div class="atlas-detail-stat">
-          <div class="atlas-detail-stat-label">On Failure</div>
-          <div class="atlas-detail-stat-value">${esc(t.on_failure || 'replan')}</div>
+          <div class="atlas-detail-stat-label">${t('detail.onFailure')}</div>
+          <div class="atlas-detail-stat-value">${esc(task.on_failure || 'replan')}</div>
         </div>
         <div class="atlas-detail-stat">
-          <div class="atlas-detail-stat-label">Created</div>
+          <div class="atlas-detail-stat-label">${t('detail.created')}</div>
           <div class="atlas-detail-stat-value" style="font-size:10px">${esc(created)}</div>
         </div>
         <div class="atlas-detail-stat">
-          <div class="atlas-detail-stat-label">Intel Score</div>
-          <div class="atlas-detail-stat-value">${t.information_score || 0}</div>
+          <div class="atlas-detail-stat-label">${t('detail.intelScore')}</div>
+          <div class="atlas-detail-stat-value">${task.information_score || 0}</div>
         </div>
       </div>
 
       <div class="atlas-detail-section">
-        <div class="atlas-detail-section-label">${ICON.lock}PRE-REQUISITES</div>
+        <div class="atlas-detail-section-label">${ICON.lock}${t('detail.prerequisites')}</div>
         ${depsBlock}
       </div>
 
       <button class="atlas-root-download" type="button" id="btn-detail-download" style="margin-top:8px; align-self:flex-start;">
         ${ICON.download}
-        Download Report
+        ${t('topbar.report.download')}
       </button>
     `;
 
@@ -1068,9 +1077,9 @@
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 0);
-      toast('Report downloaded', 'success');
+      toast(t('topbar.report.downloaded'), 'success');
     } catch (err) {
-      toast('Download failed: ' + err.message, 'error');
+      toast(t('topbar.report.downloadFailed') + err.message, 'error');
     }
   }
 
@@ -1079,7 +1088,7 @@
     if (!currentSid) return;
     try {
       const data = await api(`/api/sessions/${currentSid}/tasks/attack_graph`);
-      $('#graph-content').textContent = data.text || 'No graph data';
+      $('#graph-content').textContent = data.text || t('graph.noData');
       $('#modal-graph').classList.remove('hidden');
     } catch (err) {
       toast(err.message, 'error');
@@ -1220,6 +1229,27 @@
         $('#sidebar').classList.remove('open');
       }
     });
+
+    // Language switcher
+    document.querySelectorAll('.lang-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const lang = btn.dataset.lang;
+        if (window.i18n) window.i18n.setLang(lang);
+      });
+    });
+
+    // Re-translate dynamic UI on language change
+    window.addEventListener('i18n:change', () => {
+      if (currentSession) {
+        if (!currentSession.title) topbarTitle.textContent = t('atlas.header');
+        updateStatus(currentSession.status);
+        renderAtlas();
+        renderSessionList();
+      } else {
+        renderSessionList();
+        resetWelcomeForm();
+      }
+    });
   }
 
   // ---- Init ----
@@ -1233,7 +1263,7 @@
         await selectSession(savedSid);
       }
     } catch (err) {
-      toast('Failed to load sessions: ' + err.message, 'error');
+      toast(t('misc.loadingSessions') + err.message, 'error');
     }
   }
 
