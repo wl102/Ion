@@ -1231,12 +1231,13 @@
     });
 
     // Language switcher
-    document.querySelectorAll('.lang-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const lang = btn.dataset.lang;
-        if (window.i18n) window.i18n.setLang(lang);
+    const langSelect = $('#lang-select');
+    if (langSelect) {
+      langSelect.value = window.i18n ? window.i18n.getLang() : 'zh-CN';
+      langSelect.addEventListener('change', () => {
+        if (window.i18n) window.i18n.setLang(langSelect.value);
       });
-    });
+    }
 
     // Re-translate dynamic UI on language change
     window.addEventListener('i18n:change', () => {
