@@ -12,9 +12,18 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/ion/.venv
 ENV ION_PORT=8000
 
 # 替换 Kali 软件源为阿里云镜像（国内稳定）
-RUN sed -i 's/mirror.wane.kr/mirrors.aliyun.com/g' /etc/apt/sources.list && \
-    sed -i 's/mirrors.neusoft.edu.cn/mirrors.aliyun.com/g' /etc/apt/sources.list && \
-    sed -i 's/http.kali.org/mirrors.aliyun.com/g' /etc/apt/sources.list
+RUN if [ -f /etc/apt/sources.list ]; then \
+        sed -i 's/mirror.wane.kr/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+        sed -i 's/mirrors.neusoft.edu.cn/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+        sed -i 's/http.kali.org/mirrors.aliyun.com/g' /etc/apt/sources.list; \
+    fi && \
+    for f in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do \
+        if [ -f "$f" ]; then \
+            sed -i 's/mirror.wane.kr/mirrors.aliyun.com/g' "$f" && \
+            sed -i 's/mirrors.neusoft.edu.cn/mirrors.aliyun.com/g' "$f" && \
+            sed -i 's/http.kali.org/mirrors.aliyun.com/g' "$f"; \
+        fi; \
+    done
 
 # Install base system dependencies, networking tools, and Playwright system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
