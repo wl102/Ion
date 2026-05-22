@@ -84,7 +84,11 @@ class WebAgentRunner:
                 except Exception as exc:
                     print(f"[obs-persist] failed to insert {category!r}: {exc}")
 
-            self._persist_executor.submit(_do_insert)
+            try:
+                self._persist_executor.submit(_do_insert)
+            except RuntimeError:
+                # Executor shut down (session removed); drop silently.
+                pass
 
         logger = ObservabilityLogger(
             run_id=session_id, agent_name="root", persist_fn=_persist_observability
@@ -205,7 +209,11 @@ class WebAgentRunner:
             except Exception as exc:  # pragma: no cover — keep agent running
                 print(f"[message-persist] failed to insert {role!r}: {exc}")
 
-        self._persist_executor.submit(_do_insert)
+        try:
+            self._persist_executor.submit(_do_insert)
+        except RuntimeError:
+            # Executor shut down (session removed); drop silently.
+            pass
 
     def _set_session_status(self, status: str) -> None:
         """Persist the session lifecycle status from the runner thread."""
