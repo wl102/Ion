@@ -247,6 +247,19 @@
     updateDownloadVisibility();
   }
 
+  function markCurrentSessionStatus(status) {
+    if (currentSession) currentSession = { ...currentSession, status };
+    const idx = sessions.findIndex(s => s.id === currentSid);
+    if (idx >= 0) {
+      sessions[idx] = { ...sessions[idx], status };
+      if (currentSession && sessions[idx].id === currentSession.id) {
+        currentSession = sessions[idx];
+      }
+    }
+    updateStatus(status);
+    renderSessionList();
+  }
+
   function updateAtlasState(status) {
     const map = {
       idle: t('atlas.footer.state.idle'),
@@ -429,7 +442,7 @@
       case 'system':
         appendMessage('system', evt.payload);
         if (evt.payload && evt.payload.includes('started')) {
-          updateStatus('running');
+          markCurrentSessionStatus('running');
           showRunningUI();
         }
         break;
@@ -475,25 +488,32 @@
         handleTaskUpdate(evt.payload);
         break;
 
-      case 'done':
+      case 'done': {
         appendMessage('system', evt.payload || t('status.completed'));
-        updateStatus('completed');
+        markCurrentSessionStatus('completed');
         showIdleUI();
         disconnectSSE();
-        loadSessions().then(() => {
-          currentSession = sessions.find(s => s.id === currentSid) || currentSession;
+        const completedSid = currentSid;
+        Promise.all([loadSessions(), loadTasks()]).then(() => {
+          if (currentSid !== completedSid) return;
+          markCurrentSessionStatus('completed');
           updateDownloadVisibility();
         });
-        loadTasks();
         break;
+      }
 
-      case 'error':
+      case 'error': {
         appendMessage('error', evt.payload);
-        updateStatus('error');
+        markCurrentSessionStatus('error');
         showIdleUI();
         disconnectSSE();
-        loadSessions();
+        const erroredSid = currentSid;
+        loadSessions().then(() => {
+          if (currentSid !== erroredSid) return;
+          markCurrentSessionStatus('error');
+        });
         break;
+      }
     }
 
     scrollToBottom();
@@ -690,7 +710,7 @@
         body: JSON.stringify({ query: trimmed }),
       });
       connectSSE(currentSid);
-      updateStatus('running');
+      markCurrentSessionStatus('running');
       showRunningUI();
       await loadSessions();
     } catch (err) {
@@ -704,7 +724,7 @@
     try {
       disconnectSSE();
       await api(`/api/sessions/${currentSid}/interrupt`, { method: 'POST' });
-      updateStatus('paused');
+      markCurrentSessionStatus('paused');
       showPausedUI();
       await loadSessions();
     } catch (err) {
@@ -727,7 +747,7 @@
         body: JSON.stringify({ query: trimmed }),
       });
       connectSSE(currentSid);
-      updateStatus('running');
+      markCurrentSessionStatus('running');
       showRunningUI();
       await loadSessions();
     } catch (err) {
@@ -739,9 +759,13 @@
   // ---- Tasks / Atlas ----
   async function loadTasks() {
     if (!currentSid) return;
+    const sid = currentSid;
     try {
-      tasks = await api(`/api/sessions/${currentSid}/tasks`);
+      const loadedTasks = await api(`/api/sessions/${sid}/tasks`);
+      if (currentSid !== sid) return;
+      tasks = loadedTasks;
     } catch {
+      if (currentSid !== sid) return;
       tasks = [];
     }
     renderAtlas();

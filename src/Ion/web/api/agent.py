@@ -56,7 +56,9 @@ async def interrupt_agent(sid: str, db: Session = Depends(get_db_session)):
 
 
 @router.post("/resume")
-async def resume_agent(sid: str, req: RunRequest, db: Session = Depends(get_db_session)):
+async def resume_agent(
+    sid: str, req: RunRequest, db: Session = Depends(get_db_session)
+):
     session = db.query(SessionRecord).filter_by(id=sid).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -95,12 +97,14 @@ async def stream_events(sid: str, db: Session = Depends(get_db_session)):
         raise HTTPException(status_code=409, detail="Agent not running")
 
     async def event_generator():
-        async for line in runner.iter_sse():
-            yield line
-        # Mark session as no longer running when stream ends
-        if runner._done:
-            session.status = "completed"
-            db.commit()
+        try:
+            async for line in runner.iter_sse():
+                yield line
+        finally:
+            # Mark session as no longer running when stream ends
+            if runner._done and runner._final_status:
+                session.status = runner._final_status
+                db.commit()
 
     return StreamingResponse(
         event_generator(),

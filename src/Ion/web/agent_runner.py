@@ -10,7 +10,7 @@ from typing import Any
 
 from Ion.agent import IonAgent
 from Ion.db import Database
-from Ion.db.models import MessageRecord
+from Ion.db.models import MessageRecord, SessionRecord
 from Ion.observability import ObservabilityLogger
 from Ion.tools.task_tool import PersistentTaskManager
 
@@ -50,6 +50,7 @@ class WebAgentRunner:
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"agent-{session_id}")
         self._run_future: Any = None
         self._done = False
+        self._final_status: str | None = None
         self._start_lock = asyncio.Lock()
         self._pause_event = threading.Event()
         self._pause_event.set()  # default: not paused
@@ -205,6 +206,22 @@ class WebAgentRunner:
                 print(f"[message-persist] failed to insert {role!r}: {exc}")
 
         self._persist_executor.submit(_do_insert)
+
+    def _set_session_status(self, status: str) -> None:
+        """Persist the session lifecycle status from the runner thread."""
+        try:
+            with next(self.db.get_session()) as sess:
+                record = (
+                    sess.query(SessionRecord)
+                    .filter_by(id=self.session_id)
+                    .first()
+                )
+                if record is None:
+                    return
+                record.status = status
+                sess.commit()
+        except Exception as exc:
+            print(f"[session-status] failed to set {status!r}: {exc}")
 
     def _make_callbacks(self) -> dict[str, Any]:
         """Build callback dict for IonAgent.run() to capture streaming events.
@@ -463,11 +480,15 @@ class WebAgentRunner:
                 pause_check=pause_check,
                 initial_messages=messages,
             )
+            self._final_status = "completed"
+            self._set_session_status(self._final_status)
             self._broadcast_event({"type": "done", "payload": result}, sync=True)
         except Exception as exc:
             import traceback
             err = f"{exc}\n{traceback.format_exc()}"
             print(f"[AGENT ERROR] {err}")
+            self._final_status = "error"
+            self._set_session_status(self._final_status)
             self._broadcast_event({"type": "error", "payload": err}, sync=True)
         finally:
             self._done = True
@@ -477,6 +498,7 @@ class WebAgentRunner:
         if self._run_future is not None and not self._run_future.done():
             raise RuntimeError("Agent is already running")
         self._done = False
+        self._final_status = None
         self._main_loop = asyncio.get_running_loop()
         # Use a fresh Event so that stale SSE connections from a previous run
         # don't race with the new one.
