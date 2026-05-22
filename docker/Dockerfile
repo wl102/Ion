@@ -98,8 +98,8 @@ RUN wget -q "https://github.com/maurosoria/dirsearch/releases/download/v0.4.4/di
     && mv /tmp/dirsearch /usr/local/bin/dirsearch \
     && chmod +x /usr/local/bin/dirsearch
 
-# Install Playwright Chromium browser binaries
-RUN playwright install chromium
+# Install Playwright Chromium headless-shell (lighter, no GUI deps needed)
+RUN playwright install chromium-headless-shell
 
 # Install ffuf (fast web fuzzer)
 RUN wget -q "https://github.com/ffuf/ffuf/releases/download/v2.1.0/ffuf_2.1.0_linux_amd64.tar.gz" -O /tmp/ffuf.tar.gz \

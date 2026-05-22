@@ -21,3 +21,5 @@ logs/
 ion.db
 data/
 test.py
+ion.db-shm
+ion.db-wal

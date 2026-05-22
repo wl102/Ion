@@ -24,6 +24,9 @@ class Database:
         if self.database_url.startswith("sqlite"):
             connect_args["check_same_thread"] = False
         self.engine = create_engine(self.database_url, connect_args=connect_args, pool_pre_ping=True)
+        if self.database_url.startswith("sqlite"):
+            with self.engine.begin() as conn:
+                conn.execute(text("PRAGMA journal_mode=WAL;"))
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
 
     def get_session(self) -> Generator[Session, None, None]:
