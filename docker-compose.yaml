@@ -10,15 +10,11 @@ services:
     volumes:
       - ./data:/opt/ion/data
       - ./logs:/opt/ion/logs
-      - ion_db_volume:/opt/ion/db
+      # Pre-create the file (`touch ion.db`) so Docker bind-mounts it as a file, not a directory.
+      - ./ion.db:/opt/ion/ion.db
     env_file:
       - .env
-    environment:
-      - ION_DATABASE_URL=sqlite:////opt/ion/db/ion.db
     # Uncomment for host networking (useful for pentest scans)
     # network_mode: host
     restart: unless-stopped
     command: ["web"]
-
-volumes:
-  ion_db_volume:
