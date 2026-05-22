@@ -601,8 +601,7 @@ def run_agent_loop(
 
     Args:
         on_before_turn: Optional callback(state) invoked before each turn.
-                        Can be used to refresh the system prompt with
-                        updated runtime context (e.g., task graph state).
+                        Can be used by specialized loops for pre-turn hooks.
         agent_name: Identifier used for stdout prefixing (sub-agents).
         callbacks: Optional dict of callbacks for streaming events.
                    Supported keys: on_assistant_chunk, on_tool_start,

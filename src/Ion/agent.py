@@ -43,30 +43,6 @@ SKILL_INSTRUCTIONS = (
 )
 
 
-_RUNTIME_CONTEXT_MARKER = "[ION_RUNTIME_CONTEXT]"
-
-
-def _inject_or_replace_runtime_context(messages: list[dict], context: str):
-    """
-    Inject or replace a dynamic runtime context message at the end of the list.
-    This keeps messages[0] (the static system prompt) untouched so prefix
-    caching can reuse its KV cache across turns.
-    """
-    marked_content = f"{_RUNTIME_CONTEXT_MARKER}\n\n{context}"
-
-    # Search backwards for an existing runtime context message
-    for i in range(len(messages) - 1, -1, -1):
-        msg = messages[i]
-        if msg.get("role") == "system" and _RUNTIME_CONTEXT_MARKER in (
-            msg.get("content") or ""
-        ):
-            msg["content"] = marked_content
-            return
-
-    # Not found: append as a new trailing system message
-    messages.append({"role": "system", "content": marked_content})
-
-
 class IonAgent:
     def __init__(
         self,
@@ -144,43 +120,15 @@ class IonAgent:
     #  Prompt assembly helpers                                           #
     # ------------------------------------------------------------------ #
 
-    def _build_runtime_context(
-        self, user_goal: str, messages: Optional[list[dict]] = None
-    ) -> dict[str, Any]:
-        """Assemble Layer 3 (runtime) context from current agent state."""
-        # NOTE: messages parameter is kept for backward compatibility but no
-        # longer used. execution_history has been removed to preserve prefix
-        # cache stability (the conversation history is already in messages).
-        ctx = PromptBuilder.build_full_runtime_context(
-            user_goal=user_goal,
-            task_manager=self.task_manager,
-            skill_registry=self.skill_registry,
-            tools_schema=self.tools,
-        )
-        # Inject sub-agent catalog so the parent agent knows what it can delegate
-        subagent_catalog = self.agent_registry.get_catalog_xml()
-        if subagent_catalog:
-            ctx["subagent_catalog"] = subagent_catalog
-        return ctx
-
     def _build_system_prompt(
         self, user_goal: str, messages: Optional[list[dict]] = None
     ) -> str:
-        """Build the complete system prompt from all three layers."""
-        if not self.use_layered_prompts or self._prompt_builder is None:
-            prompt = self._fallback_prompt or DEFAULT_SYSTEM_PROMPT
-            # Inject sub-agent catalog so the parent agent knows what it can delegate
-            subagent_catalog = self.agent_registry.get_catalog_xml()
-            if subagent_catalog:
-                prompt += (
-                    f"\n\nYou may delegate specialized tasks to sub-agents. "
-                    f"Use list_subagents to see available agents and spawn_subagent to delegate.\n\n"
-                    f"{subagent_catalog}"
-                )
-            return prompt
+        """Backward-compatible alias for the static system prompt.
 
-        runtime_ctx = self._build_runtime_context(user_goal, messages)
-        return self._prompt_builder.build_system_prompt(runtime_ctx)
+        Runtime Mission Context is intentionally no longer injected into the
+        prompt. The model must query task state through tools.
+        """
+        return self._static_system_prompt
 
     def _build_static_system_prompt(self) -> str:
         """Build the static system prompt (Layers 1-4 + 6) once per session."""
@@ -200,18 +148,10 @@ class IonAgent:
             subagent_catalog=subagent_catalog
         )
 
-    def _build_dynamic_context(self, user_goal: str) -> str:
-        """Build only the dynamic Mission Context (Layer 5)."""
-        if not self.use_layered_prompts or self._prompt_builder is None:
-            return ""
+    def get_system_prompt(self) -> str:
+        """Return the static system prompt used as messages[0]."""
+        return self._static_system_prompt
 
-        runtime_ctx = PromptBuilder.build_full_runtime_context(
-            user_goal=user_goal,
-            task_manager=self.task_manager,
-            skill_registry=self.skill_registry,
-            tools_schema=self.tools,
-        )
-        return self._prompt_builder.build_dynamic_context(runtime_ctx)
 
     # ------------------------------------------------------------------ #
     #  Main execution                                                    #
@@ -239,14 +179,7 @@ class IonAgent:
         """
         if initial_messages is not None:
             messages = list(initial_messages)
-            # Derive user_goal from the first user message for system-prompt refresh
-            user_goal = query
-            for msg in messages:
-                if msg.get("role") == "user":
-                    user_goal = msg.get("content", "") or query
-                    break
         else:
-            user_goal = query
             messages = [
                 {"role": "system", "content": self._static_system_prompt},
                 {"role": "user", "content": query},
@@ -258,16 +191,6 @@ class IonAgent:
             context_max_tokens=self.context_max_tokens,
             hook_queue=self.hook_queue,
         )
-
-        # Callback to refresh the system prompt before each turn.
-        # This allows Layer 3 runtime context (task graph, execution history)
-        # to stay up-to-date as the agent loop progresses.
-        def _on_before_turn(st: LoopState):
-            if not self.use_layered_prompts:
-                return
-            dynamic_ctx = self._build_dynamic_context(user_goal=user_goal)
-            if dynamic_ctx:
-                _inject_or_replace_runtime_context(st.messages, dynamic_ctx)
 
         # Inject verbose flag into callbacks so sub-agents can inherit it
         if callbacks is None:
@@ -288,7 +211,6 @@ class IonAgent:
                 state,
                 self.tools,
                 self.logger,
-                on_before_turn=_on_before_turn,
                 callbacks=callbacks,
                 pause_check=pause_check,
                 verbose=self.verbose,

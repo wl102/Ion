@@ -94,6 +94,8 @@ _TASK_STATE_MANDATE = """\
 ## Task-State Mandate (HARD REQUIREMENT)
 The task graph is the single source of truth for execution state. Saying "task X is done" in your prose does NOT change graph state — only an `update_task` call does. Status drift (graph still says `pending`/`running` after the work is finished) breaks dependency resolution, ready-queue ordering, and downstream replanning.
 
+Runtime task state is not injected into the system prompt. When you need the current graph state — especially after resuming, after tool batches, or before choosing the next task — query it with `list_tasks` or `attack_graph_view`.
+
 You MUST call `update_task` at each of these decision points:
 
 - **Claiming a task** → before issuing the first substantive tool call for a task, set `update_task(task_id, status="running")`. This signals progress and prevents you from interleaving unrelated work.

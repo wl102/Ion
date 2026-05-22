@@ -423,6 +423,11 @@ class WebAgentRunner:
                 continue
 
             msg = r.to_openai_message()
+            if (
+                msg.get("role") == "system"
+                and "[ION_RUNTIME_CONTEXT]" in (msg.get("content") or "")
+            ):
+                continue
 
             # If assistant message references tool_calls whose results were
             # evicted, strip the tool_calls field to avoid confusing the model.
@@ -436,15 +441,10 @@ class WebAgentRunner:
 
             messages.append(msg)
 
-        # Refresh the system prompt with current runtime context
+        # Refresh the first system prompt with the static prompt only. Runtime
+        # task state is queried by tools instead of injected into messages.
         if messages and messages[0].get("role") == "system":
-            user_goal = ""
-            for m in messages:
-                if m.get("role") == "user":
-                    user_goal = m.get("content", "")
-                    break
-            new_prompt = self.agent._build_system_prompt(user_goal=user_goal)
-            messages[0]["content"] = new_prompt
+            messages[0]["content"] = self.agent.get_system_prompt()
 
         return messages
 
@@ -500,7 +500,7 @@ class WebAgentRunner:
         """
         messages = self._rebuild_messages(max_tools=15)
         if not messages or messages[0].get("role") != "system":
-            system_prompt = self.agent._build_system_prompt(user_goal=query)
+            system_prompt = self.agent.get_system_prompt()
             messages.insert(0, {"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": query})
         self._persist_message(role="user", content=query)
@@ -511,7 +511,7 @@ class WebAgentRunner:
         async with self._start_lock:
             messages = self._rebuild_messages(max_tools=15)
             if not messages or messages[0].get("role") != "system":
-                system_prompt = self.agent._build_system_prompt(user_goal=query)
+                system_prompt = self.agent.get_system_prompt()
                 messages.insert(0, {"role": "system", "content": system_prompt})
             if query:
                 messages.append({"role": "user", "content": query})
