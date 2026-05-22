@@ -157,11 +157,9 @@ def _generate_title(query: str, mode: str) -> str:
                 ),
             },
         ]
-        from Ion.ion import _adapt_messages_for_model
-
         create_kwargs = {
             "model": model_id,
-            "messages": _adapt_messages_for_model(raw_messages, model_id),
+            "messages": list(raw_messages),
             "max_tokens": 2048,
             "temperature": 0.2,
         }

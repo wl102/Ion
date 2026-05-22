@@ -23,6 +23,7 @@ from Ion.ion import (
     _short,
     _summary_looks_unusable,
     _synthesize_from_messages,
+    split_display_thinking,
 )
 from Ion.subagent_models import (
     SubagentLoopTracker,
@@ -45,6 +46,74 @@ class TestShort(unittest.TestCase):
 
     def test_short_empty(self):
         self.assertEqual(_short("", 10), "")
+
+
+class TestSplitDisplayThinking(unittest.TestCase):
+    def test_only_reasoning_content(self):
+        display_content, display_reasoning = split_display_thinking(None, "raw reasoning")
+        self.assertEqual(display_reasoning, "raw reasoning")
+        self.assertIsNone(display_content)
+
+    def test_think_tag_in_content(self):
+        display_content, display_reasoning = split_display_thinking(
+            "<think>abc</think>answer", None
+        )
+        self.assertEqual(display_reasoning, "abc")
+        self.assertEqual(display_content, "answer")
+
+    def test_both_reasoning_and_think_tag(self):
+        display_content, display_reasoning = split_display_thinking(
+            "<think>inline</think>final", "prefix"
+        )
+        self.assertEqual(display_reasoning, "prefixinline")
+        self.assertEqual(display_content, "final")
+
+    def test_multiple_think_blocks(self):
+        display_content, display_reasoning = split_display_thinking(
+            "<think>a</think>mid<think>b</think>end", None
+        )
+        self.assertEqual(display_reasoning, "ab")
+        self.assertEqual(display_content, "midend")
+
+    def test_case_insensitive(self):
+        display_content, display_reasoning = split_display_thinking(
+            "<THINK>upper</THINK>rest", None
+        )
+        self.assertEqual(display_reasoning, "upper")
+        self.assertEqual(display_content, "rest")
+
+    def test_multiline_think(self):
+        display_content, display_reasoning = split_display_thinking(
+            "<think>line1\nline2</think>rest", None
+        )
+        self.assertEqual(display_reasoning, "line1\nline2")
+        self.assertEqual(display_content, "rest")
+
+    def test_no_think_tags(self):
+        display_content, display_reasoning = split_display_thinking(
+            "plain content", "raw reasoning"
+        )
+        self.assertEqual(display_content, "plain content")
+        self.assertEqual(display_reasoning, "raw reasoning")
+
+    def test_empty_content(self):
+        display_content, display_reasoning = split_display_thinking("", None)
+        self.assertIsNone(display_content)
+        self.assertIsNone(display_reasoning)
+
+    def test_think_with_attributes(self):
+        display_content, display_reasoning = split_display_thinking(
+            '<think type="chain">deep</think>out', None
+        )
+        self.assertEqual(display_reasoning, "deep")
+        self.assertEqual(display_content, "out")
+
+    def test_only_think_no_other_content(self):
+        display_content, display_reasoning = split_display_thinking(
+            "<think>only</think>", None
+        )
+        self.assertIsNone(display_content)
+        self.assertEqual(display_reasoning, "only")
 
 
 class TestClassifyToolResult(unittest.TestCase):

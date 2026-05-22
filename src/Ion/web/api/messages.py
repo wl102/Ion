@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from Ion.db import Database, get_default_db
 from Ion.db.models import MessageRecord, SessionRecord
+from Ion.ion import split_display_thinking
 from Ion.web.schemas import MessageOut
 
 router = APIRouter()
@@ -37,7 +38,15 @@ def list_messages(
         .limit(limit)
         .all()
     )
-    return [r.to_dict() for r in records]
+    result = []
+    for r in records:
+        msg = r.to_dict()
+        if msg.get("role") == "assistant":
+            msg["content"], msg["reasoning_content"] = split_display_thinking(
+                msg.get("content"), msg.get("reasoning_content")
+            )
+        result.append(msg)
+    return result
 
 
 @router.delete("")

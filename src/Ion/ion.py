@@ -155,27 +155,35 @@ def _vprint(verbose: bool, *args, **kwargs):
         print(*args, **kwargs)
 
 
-# OpenAI chat-completion message fields that may appear in a request body.
-# Anything else (e.g. our internal ``reasoning_content``) is stripped before
-# calling litellm so that strict providers don't reject unknown keys.
-_ALLOWED_MESSAGE_FIELDS = {"role", "content", "name", "tool_calls", "tool_call_id", "refusal"}
+_THINK_RE = re.compile(r"<think\b[^>]*>(.*?)</think>", re.IGNORECASE | re.DOTALL)
 
 
-def _adapt_messages_for_model(messages: list[dict], model_id: str) -> list[dict]:
-    """Return a sanitized copy of *messages* ready for the LLM API.
+def split_display_thinking(
+    content: Optional[str], reasoning_content: Optional[str]
+) -> tuple[Optional[str], Optional[str]]:
+    """Return display copies of *content* and *reasoning_content*.
 
-    1. Strip any non-standard fields so providers never see unknown keys.
-    2. MiniMax: ``role="system"`` is rejected (error 2013).  Rewrite every
-       ``system`` message to ``user``.
+    *display_reasoning_content* = *reasoning_content* + all text inside
+    ``<think>...</think>`` blocks found in *content*.
+
+    *display_content* = *content* with all ``<think>...</think>`` removed.
+
+    Original fields are never modified.
     """
-    is_minimax = "minimax" in model_id.lower()
-    adapted: list[dict] = []
-    for msg in messages:
-        m = {k: v for k, v in msg.items() if k in _ALLOWED_MESSAGE_FIELDS}
-        if is_minimax and m.get("role") == "system":
-            m["role"] = "user"
-        adapted.append(m)
-    return adapted
+    if not content:
+        return content or None, reasoning_content or None
+
+    think_texts = _THINK_RE.findall(content)
+    display_content = _THINK_RE.sub("", content)
+    display_content = display_content.strip() or None
+
+    display_reasoning = reasoning_content or ""
+    for think_text in think_texts:
+        display_reasoning += think_text
+
+    display_reasoning = display_reasoning.strip() or None
+
+    return display_content, display_reasoning
 
 
 def _compress_context(model_id: str, api_key: str, base_url: str, state: LoopState, logger=None):
@@ -250,7 +258,7 @@ Wrap your summary in <summary></summary> tags.""",
     try:
         create_kwargs = {
             "model": model_id,
-            "messages": _adapt_messages_for_model(summary_messages, model_id),
+            "messages": list(summary_messages),
             "max_tokens": 4000,
             "stream": False,
         }
@@ -300,7 +308,7 @@ def run_one_turn(
     try:
         create_kwargs = {
             "model": model_id,
-            "messages": _adapt_messages_for_model(state.messages, model_id),
+            "messages": list(state.messages),
             "tools": tools,
             "tool_choice": "auto",
             "stream": True,
