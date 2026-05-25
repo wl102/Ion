@@ -3,9 +3,11 @@ SubagentResult fields from message history when the model leaves them empty.
 """
 
 import json
+import queue
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -23,6 +25,7 @@ from Ion.ion import (
     _short,
     _summary_looks_unusable,
     _synthesize_from_messages,
+    run_agent_loop,
     split_display_thinking,
 )
 from Ion.subagent_models import (
@@ -114,6 +117,43 @@ class TestSplitDisplayThinking(unittest.TestCase):
         )
         self.assertIsNone(display_content)
         self.assertEqual(display_reasoning, "only")
+
+
+class TestRunAgentLoopHooks(unittest.TestCase):
+    def test_resume_with_pending_hook_continues_after_stop(self):
+        hook_queue = queue.Queue()
+        state = LoopState(
+            messages=[{"role": "system", "content": "system"}],
+            hook_queue=hook_queue,
+        )
+        turns = []
+
+        def fake_run_one_turn(*args, **kwargs):
+            turns.append([m.copy() for m in state.messages])
+            state.messages.append({"role": "assistant", "content": f"turn {len(turns)}"})
+            state.finish_reason = "stop"
+            state.turn_count += 1
+
+        def pause_check():
+            if len(turns) == 1:
+                hook_queue.put("continue after resume")
+
+        with patch("Ion.ion.run_one_turn", fake_run_one_turn):
+            run_agent_loop(
+                "model",
+                "key",
+                "url",
+                state,
+                [],
+                pause_check=pause_check,
+                verbose=False,
+            )
+
+        self.assertEqual(len(turns), 2)
+        self.assertIn(
+            {"role": "user", "content": "continue after resume"},
+            turns[1],
+        )
 
 
 class TestClassifyToolResult(unittest.TestCase):

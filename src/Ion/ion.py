@@ -583,6 +583,16 @@ def _check_and_inject_hooks(state: LoopState):
         state.messages.append({"role": "user", "content": hook_content})
 
 
+def _has_pending_hooks(state: LoopState) -> bool:
+    """Best-effort check for hooks queued while the loop was paused."""
+    if state.hook_queue is None:
+        return False
+    try:
+        return not state.hook_queue.empty()
+    except Exception:
+        return False
+
+
 def run_agent_loop(
     model_id: str,
     api_key: str,
@@ -653,6 +663,9 @@ def run_agent_loop(
                 continue  # retry the turn after compression
 
             if state.finish_reason != "tool_calls":
+                if _has_pending_hooks(state):
+                    state.finish_reason = None
+                    continue
                 return
     finally:
         if token is not None:

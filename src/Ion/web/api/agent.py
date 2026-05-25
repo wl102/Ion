@@ -79,11 +79,18 @@ async def resume_agent(
         db.commit()
         return {"status": "resumed_from_snapshot", "session_id": sid}
 
-    await runner.submit_hook(req.query)
-    runner.resume()
-    session.status = "running"
-    db.commit()
-    return {"status": "resumed", "session_id": sid}
+    async with runner._start_lock:
+        if runner._run_future is None or runner._run_future.done():
+            session.status = "running"
+            db.commit()
+            await runner.start(req.query)
+            return {"status": "restarted", "session_id": sid}
+
+        await runner.submit_hook(req.query)
+        runner.resume()
+        session.status = "running"
+        db.commit()
+        return {"status": "resumed", "session_id": sid}
 
 
 @router.get("/stream")
