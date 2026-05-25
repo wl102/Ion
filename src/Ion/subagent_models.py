@@ -242,6 +242,13 @@ class SubagentResult(BaseModel):
                         )
                     except Exception:
                         pass
+                if "why_stopped" in parsed_meta:
+                    try:
+                        result.why_stopped = WhyStopped(
+                            parsed_meta["why_stopped"]
+                        )
+                    except Exception:
+                        pass
                 if "next_agent" in parsed_meta:
                     v = parsed_meta["next_agent"]
                     result.next_agent = str(v)[:100] if v is not None else None
@@ -272,8 +279,13 @@ class SubagentResult(BaseModel):
         if text_part:
             result.summary = text_part[:3000]
 
-        result.why_stopped = WhyStopped.NO_PROGRESS
-        result.recommended_owner = RecommendedOwner.PARENT
+        # Only overwrite why_stopped and recommended_owner with defaults if no JSON
+        # metadata was parsed at all. When metadata exists, trust the values from
+        # the model (or let _extract_result override why_stopped with the actual
+        # loop-level stop reason later).
+        if not parsed_meta:
+            result.why_stopped = WhyStopped.NO_PROGRESS
+            result.recommended_owner = RecommendedOwner.PARENT
         return result
 
 

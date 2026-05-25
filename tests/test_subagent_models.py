@@ -97,6 +97,25 @@ class TestSubagentResultParsing(unittest.TestCase):
         self.assertEqual(result.status, SubagentStatus.FAILED)
         self.assertEqual(result.summary, raw)
 
+    def test_why_stopped_preserved_from_json(self):
+        raw = '{"status": "completed", "summary": "done", "why_stopped": "success", "recommended_owner": "same_agent"}'
+        result = SubagentResult.from_raw_output(raw)
+        self.assertEqual(result.why_stopped, WhyStopped.SUCCESS)
+        self.assertEqual(result.recommended_owner, RecommendedOwner.SAME_AGENT)
+
+    def test_why_stopped_manual_mapping_fallback(self):
+        # Invalid type triggers manual mapping fallback
+        raw = '{"status": 123, "why_stopped": "blocked", "recommended_owner": "other_agent"}'
+        result = SubagentResult.from_raw_output(raw)
+        self.assertEqual(result.why_stopped, WhyStopped.BLOCKED)
+        self.assertEqual(result.recommended_owner, RecommendedOwner.OTHER_AGENT)
+
+    def test_plain_text_gets_defaults(self):
+        raw = "Just plain text with no JSON."
+        result = SubagentResult.from_raw_output(raw)
+        self.assertEqual(result.why_stopped, WhyStopped.NO_PROGRESS)
+        self.assertEqual(result.recommended_owner, RecommendedOwner.PARENT)
+
 
 class TestSubagentRequest(unittest.TestCase):
     def test_request_defaults(self):

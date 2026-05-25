@@ -1443,8 +1443,10 @@ def _synthesize_from_messages(messages: list[dict]) -> dict[str, list]:
     forgot to populate the structured fields.
 
     Design intent: the whole point of delegating to a subagent is to compress
-    context for the parent. Re-injecting raw tool output into ``evidence``
-    would defeat that. So this helper is deliberately stingy:
+    context for the parent. So this helper is deliberately stingy for most
+    fields, but it *does* auto-populate ``evidence`` with high-value outputs
+    (file reads, HTTP responses, tool results) so the parent does not have to
+    re-run the same commands to see what happened.
 
     - ``attempted_actions``: compact "tool(arg=val) -> success|failed" entries.
       Lets the parent know what was tried so it does not redo the same work.
@@ -1452,11 +1454,11 @@ def _synthesize_from_messages(messages: list[dict]) -> dict[str, list]:
       embedded inside shell commands). The parent can read them on demand.
     - ``key_findings``: ONE per-tool summary line ("nmap returned 320 chars,
       classified success") — a header note, not a content dump.
-    - ``evidence``: intentionally NOT auto-populated. Curating evidence is
-      the model's job; if it skipped, the parent gets the action list and
-      artifact paths and decides whether to dig deeper.
+    - ``evidence``: intelligently auto-populated from successful tool outputs.
+      File reads, HTTP responses, web searches, and general tool results are
+      captured (with length caps) so the parent gets actionable detail.
     """
-    from Ion.subagent_models import AttemptedAction, Artifact
+    from Ion.subagent_models import AttemptedAction, Artifact, EvidenceItem
 
     ordered_calls: list[tuple[str, str, str]] = []  # (id, name, args_json)
 
@@ -1475,8 +1477,7 @@ def _synthesize_from_messages(messages: list[dict]) -> dict[str, list]:
                     args = str(args)
             ordered_calls.append((tc_id, name, args))
 
-    # Map tool_call_id -> tool result content (kept around only for length /
-    # classification — never copied into evidence).
+    # Map tool_call_id -> tool result content.
     result_map: dict[str, str] = {}
     for msg in messages:
         if msg.get("role") != "tool":
@@ -1495,6 +1496,8 @@ def _synthesize_from_messages(messages: list[dict]) -> dict[str, list]:
     attempted: list[AttemptedAction] = []
     artifacts: list[Artifact] = []
     key_findings: list[str] = []
+    evidence: list[EvidenceItem] = []
+    seen_evidence_keys: set[str] = set()
     seen_artifact_paths: set[str] = set()
 
     # Args that *are* the action (don't truncate them aggressively).
@@ -1559,7 +1562,67 @@ def _synthesize_from_messages(messages: list[dict]) -> dict[str, list]:
                         Artifact(path=path, description=f"output of {name}")
                     )
 
-            # Per-tool header note + a short content snippet so the parent agent
+            # --- Intelligent evidence auto-fill for high-value outputs ---
+        # Only populate when the tool succeeded and we haven't seen this exact
+        # (type, source) pair before, to avoid bloat.
+        if result_kind == "success" and raw_result:
+            ev_type = ""
+            ev_source = ""
+            ev_value = ""
+
+            # 1. File reads via bash (cat, head, tail, grep, strings, ...)
+            if name in ("bash", "sh", "shell", "exec", "run_shell", "execute") and isinstance(args_obj, dict):
+                cmd = ""
+                for key in _COMMAND_KEYS:
+                    v = args_obj.get(key)
+                    if isinstance(v, str) and v.strip():
+                        cmd = v.strip()
+                        break
+                read_paths = _extract_read_paths_from_bash(cmd)
+                if read_paths:
+                    ev_type = "file"
+                    ev_source = read_paths[0]
+                    ev_value = _trunc(raw_result, 3000)
+                else:
+                    ev_type = "tool_output"
+                    ev_source = _short(cmd, 200)
+                    ev_value = _trunc(raw_result, 2000)
+
+            # 2. HTTP / Browser requests
+            elif name in ("http_request", "browser_execute") and isinstance(args_obj, dict):
+                ev_type = "http_response"
+                ev_source = str(args_obj.get("url", ""))
+                ev_value = _trunc(raw_result, 3000)
+
+            # 3. Web searches
+            elif name in ("web_search", "search_web") and isinstance(args_obj, dict):
+                ev_type = "observation"
+                ev_source = str(args_obj.get("query", args_obj.get("q", "")))
+                ev_value = _trunc(raw_result, 3000)
+
+            # 4. Python exec
+            elif name == "python_exec" and isinstance(args_obj, dict):
+                ev_type = "tool_output"
+                ev_source = _short(str(args_obj.get("code", args_obj.get("script", "python_exec"))), 200)
+                ev_value = _trunc(raw_result, 2000)
+
+            # 5. General successful tools (nmap, curl, etc.)
+            else:
+                ev_type = "tool_output"
+                ev_source = name
+                if isinstance(args_obj, dict):
+                    for k, v in args_obj.items():
+                        if k in ("target", "host", "url", "path", "command"):
+                            ev_source = f"{name}({k}={_short(str(v), 60)})"
+                            break
+                ev_value = _trunc(raw_result, 2000)
+
+            ev_key = f"{ev_type}:{ev_source}"
+            if ev_key not in seen_evidence_keys:
+                seen_evidence_keys.add(ev_key)
+                evidence.append(EvidenceItem(type=ev_type, source=ev_source, value=ev_value))
+
+        # Per-tool header note + a short content snippet so the parent agent
         # gets actionable signal, not just "tool X ran". For shell-style
         # tools, prefer the actual program name (`nmap`, `curl`, ...) over
         # the wrapper name so multiple bash calls are distinguishable.
@@ -1576,8 +1639,7 @@ def _synthesize_from_messages(messages: list[dict]) -> dict[str, list]:
 
     return {
         "attempted_actions": attempted[-20:],
-        # Evidence is the model's job; we never auto-fill it.
-        "evidence": [],
+        "evidence": evidence[-20:],
         "artifacts": artifacts[-15:],
         # Content-bearing snippets — filtered for signal, deduplicated.
         "key_findings": key_findings[-20:],
@@ -1629,3 +1691,52 @@ def _short(text: str, n: int) -> str:
         return ""
     text = text.replace("\n", " ").strip()
     return text if len(text) <= n else text[: n - 1] + "…"
+
+
+def _trunc(text: str, limit: int) -> str:
+    """Truncate text to *limit* chars, preserving newlines."""
+    if not text or len(text) <= limit:
+        return text or ""
+    return text[: limit - 1] + "…"
+
+
+_READ_COMMANDS = {
+    "cat", "head", "tail", "grep", "strings", "awk", "sed", "cut",
+    "sort", "uniq", "wc", "xxd", "hexdump", "file",
+}
+
+
+def _extract_read_paths_from_bash(cmd: str) -> list[str]:
+    """Extract file paths that are being READ by a bash command."""
+    if not cmd or not isinstance(cmd, str):
+        return []
+    tokens = cmd.strip().split()
+    if not tokens:
+        return []
+    # Skip env assignments and prefix words to find actual command
+    skip_prefixes = {"sudo", "time", "nice", "ionice", "stdbuf", "exec", "env"}
+    actual_cmd = None
+    for tok in tokens:
+        if "=" in tok and not tok.startswith("/") and not tok.startswith("-"):
+            continue
+        if tok in skip_prefixes:
+            continue
+        actual_cmd = tok.rsplit("/", 1)[-1]
+        break
+    if actual_cmd not in _READ_COMMANDS:
+        return []
+    path_like: list[str] = []
+    for tok in tokens:
+        if tok.startswith("-"):
+            continue
+        if tok in {"|", ">", ">>", "<", "&&", "||", ";", "`", "$(", ")", "{", "}"}:
+            break
+        p = tok.strip('"').strip("'")
+        if not p or p in path_like:
+            continue
+        if "/" in p or ("." in p and not p.startswith("-")):
+            path_like.append(p)
+    # For simple read commands, the last path-like token is the target file
+    if actual_cmd in {"cat", "head", "tail", "strings"} and path_like:
+        return [path_like[-1]]
+    return path_like

@@ -336,11 +336,17 @@ class TestSynthesizeFromMessages(unittest.TestCase):
         self.assertIn("nmap_scan", names)
         self.assertIn("nuclei_run", names)
 
-    def test_evidence_is_not_auto_filled(self):
-        # Evidence is the model's job — re-injecting raw tool output would
-        # defeat the whole point of context compression in delegation.
+    def test_evidence_is_auto_filled(self):
+        # High-value tool outputs are now auto-captured so the parent does not
+        # have to re-run the same commands to see what happened.
         result = _synthesize_from_messages(self._build_messages())
-        self.assertEqual(result["evidence"], [])
+        self.assertGreater(len(result["evidence"]), 0)
+        ev_sources = [e.source for e in result["evidence"]]
+        self.assertTrue(any("nmap_scan" in s for s in ev_sources))
+        self.assertTrue(any("nuclei_run" in s for s in ev_sources))
+        for ev in result["evidence"]:
+            self.assertLessEqual(len(ev.value), 2000)
+            self.assertIn(ev.type, ("file", "http_response", "observation", "tool_output"))
 
     def test_artifacts_extracted_from_path_args(self):
         result = _synthesize_from_messages(self._build_messages())
@@ -520,9 +526,9 @@ class TestExtractResultEnrichment(unittest.TestCase):
                            "attempted_actions should be auto-populated from tool calls")
         self.assertGreater(len(result.key_findings), 0,
                            "key_findings should at least carry per-tool header notes")
-        # Evidence is intentionally NOT auto-filled (preserves context compression).
-        self.assertEqual(result.evidence, [],
-                         "evidence is the model's job; auto-filling defeats delegation")
+        # Evidence is now auto-filled with high-value tool outputs.
+        self.assertGreater(len(result.evidence), 0,
+                           "evidence should be auto-populated from tool outputs")
         self.assertEqual(result.attempted_actions[0].action.split("(")[0], "nmap")
         self.assertEqual(result.attempted_actions[0].result, "success")
         # Original summary preserved
