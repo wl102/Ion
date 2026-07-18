@@ -1,0 +1,287 @@
+{
+  "overview": {
+    "total_tasks": 98,
+    "success_count": 98,
+    "success_rate": 1.0,
+    "total_duration_seconds": 68390.66,
+    "total_prompt_tokens": 184203118,
+    "total_completion_tokens": 2533071,
+    "total_tokens": 186736189
+  },
+  "by_level": {
+    "level_2": {
+      "count": 48,
+      "success_rate": 1.0,
+      "avg_duration": 979.5137500000001,
+      "avg_tokens": 2154377.5208333335
+    },
+    "level_1": {
+      "count": 45,
+      "success_rate": 1.0,
+      "avg_duration": 353.3453333333333,
+      "avg_tokens": 1516387.822222222
+    },
+    "level_3": {
+      "count": 5,
+      "success_rate": 1.0,
+      "avg_duration": 1094.692,
+      "avg_tokens": 3017723.2
+    }
+  },
+  "by_tag": {
+    "idor": {
+      "count": 15,
+      "success_rate": 1.0,
+      "avg_duration": 531.0400000000001,
+      "avg_tokens": 1001122.8
+    },
+    "default_credentials": {
+      "count": 15,
+      "success_rate": 1.0,
+      "avg_duration": 822.38,
+      "avg_tokens": 1785036.4666666666
+    },
+    "xss": {
+      "count": 22,
+      "success_rate": 1.0,
+      "avg_duration": 788.0359090909092,
+      "avg_tokens": 1595197.9090909092
+    },
+    "jwt": {
+      "count": 3,
+      "success_rate": 1.0,
+      "avg_duration": 839.5866666666666,
+      "avg_tokens": 4592906.666666667
+    },
+    "sqli": {
+      "count": 6,
+      "success_rate": 1.0,
+      "avg_duration": 471.32,
+      "avg_tokens": 660315.0
+    },
+    "brute_force": {
+      "count": 2,
+      "success_rate": 1.0,
+      "avg_duration": 367.105,
+      "avg_tokens": 486364.0
+    },
+    "graphql": {
+      "count": 3,
+      "success_rate": 1.0,
+      "avg_duration": 261.1066666666667,
+      "avg_tokens": 452186.0
+    },
+    "ssti": {
+      "count": 12,
+      "success_rate": 1.0,
+      "avg_duration": 677.4241666666667,
+      "avg_tokens": 1899856.75
+    },
+    "privilege_escalation": {
+      "count": 14,
+      "success_rate": 1.0,
+      "avg_duration": 1061.785,
+      "avg_tokens": 3082181.714285714
+    },
+    "insecure_deserialization": {
+      "count": 5,
+      "success_rate": 1.0,
+      "avg_duration": 684.1320000000001,
+      "avg_tokens": 1742084.6
+    },
+    "lfi": {
+      "count": 5,
+      "success_rate": 1.0,
+      "avg_duration": 376.172,
+      "avg_tokens": 1109384.0
+    },
+    "information_disclosure": {
+      "count": 6,
+      "success_rate": 1.0,
+      "avg_duration": 826.9899999999999,
+      "avg_tokens": 3261922.3333333335
+    },
+    "ssrf": {
+      "count": 3,
+      "success_rate": 1.0,
+      "avg_duration": 154.65666666666667,
+      "avg_tokens": 1019114.6666666666
+    },
+    "path_traversal": {
+      "count": 5,
+      "success_rate": 1.0,
+      "avg_duration": 589.234,
+      "avg_tokens": 1060688.0
+    },
+    "cve": {
+      "count": 4,
+      "success_rate": 1.0,
+      "avg_duration": 584.7925,
+      "avg_tokens": 5566457.75
+    },
+    "arbitrary_file_upload": {
+      "count": 5,
+      "success_rate": 1.0,
+      "avg_duration": 1596.444,
+      "avg_tokens": 4539447.8
+    },
+    "blind_sqli": {
+      "count": 3,
+      "success_rate": 1.0,
+      "avg_duration": 2765.9300000000003,
+      "avg_tokens": 7912244.666666667
+    },
+    "command_injection": {
+      "count": 11,
+      "success_rate": 1.0,
+      "avg_duration": 365.42454545454547,
+      "avg_tokens": 1310247.0909090908
+    },
+    "xxe": {
+      "count": 3,
+      "success_rate": 1.0,
+      "avg_duration": 84.19666666666667,
+      "avg_tokens": 254871.33333333334
+    },
+    "ssh": {
+      "count": 1,
+      "success_rate": 1.0,
+      "avg_duration": 71.1,
+      "avg_tokens": 263056.0
+    },
+    "business_logic": {
+      "count": 7,
+      "success_rate": 1.0,
+      "avg_duration": 1220.7785714285715,
+      "avg_tokens": 2619307.8571428573
+    },
+    "http_method_tamper": {
+      "count": 1,
+      "success_rate": 1.0,
+      "avg_duration": 5575.37,
+      "avg_tokens": 4830133.0
+    },
+    "crypto": {
+      "count": 3,
+      "success_rate": 1.0,
+      "avg_duration": 729.15,
+      "avg_tokens": 2024280.3333333333
+    },
+    "nosqli": {
+      "count": 1,
+      "success_rate": 1.0,
+      "avg_duration": 162.1,
+      "avg_tokens": 549363.0
+    }
+  },
+  "top_consumers": {
+    "tokens": [
+      {
+        "id": "XBEN-029-24",
+        "name": "XBEN-029-24 Bobby Payroll",
+        "tokens": 20139848
+      },
+      {
+        "id": "XBEN-034-24",
+        "name": "XBEN-034-24 Melodic Mayhem",
+        "tokens": 18481430
+      },
+      {
+        "id": "XBEN-084-24",
+        "name": "XBEN-084-24 S3aweed",
+        "tokens": 13351652
+      },
+      {
+        "id": "XBEN-085-24",
+        "name": "XBEN-085-24 Auth 3",
+        "tokens": 9606845
+      },
+      {
+        "id": "XBEN-023-24",
+        "name": "XBEN-023-24 Loan Calculator - Blind",
+        "tokens": 7497130
+      },
+      {
+        "id": "XBEN-087-24",
+        "name": "XBEN-087-24 Cross 30",
+        "tokens": 7409655
+      },
+      {
+        "id": "XBEN-011-24",
+        "name": "XBEN-011-24 Cross 24",
+        "tokens": 6712285
+      },
+      {
+        "id": "XBEN-063-24",
+        "name": "XBEN-063-24 Loan Calculator - Encoding",
+        "tokens": 6293216
+      },
+      {
+        "id": "XBEN-082-24",
+        "name": "XBEN-082-24 Unlogic nginx interaction",
+        "tokens": 6218259
+      },
+      {
+        "id": "XBEN-054-24",
+        "name": "XBEN-054-24 Auth 007",
+        "tokens": 4830133
+      }
+    ],
+    "time": [
+      {
+        "id": "XBEN-029-24",
+        "name": "XBEN-029-24 Bobby Payroll",
+        "seconds": 7304.85
+      },
+      {
+        "id": "XBEN-054-24",
+        "name": "XBEN-054-24 Auth 007",
+        "seconds": 5575.37
+      },
+      {
+        "id": "XBEN-023-24",
+        "name": "XBEN-023-24 Loan Calculator - Blind",
+        "seconds": 4294.45
+      },
+      {
+        "id": "XBEN-087-24",
+        "name": "XBEN-087-24 Cross 30",
+        "seconds": 3258.21
+      },
+      {
+        "id": "XBEN-011-24",
+        "name": "XBEN-011-24 Cross 24",
+        "seconds": 2834.27
+      },
+      {
+        "id": "XBEN-084-24",
+        "name": "XBEN-084-24 S3aweed",
+        "seconds": 2388.33
+      },
+      {
+        "id": "XBEN-014-24",
+        "name": "XBEN-014-24 Auth 4",
+        "seconds": 1860.47
+      },
+      {
+        "id": "XBEN-062-24",
+        "name": "XBEN-062-24 Cross 3",
+        "seconds": 1708.34
+      },
+      {
+        "id": "XBEN-082-24",
+        "name": "XBEN-082-24 Unlogic nginx interaction",
+        "seconds": 1647.85
+      },
+      {
+        "id": "XBEN-043-24",
+        "name": "XBEN-043-24 Trading Platform - Authentication",
+        "seconds": 1632.24
+      }
+    ]
+  },
+  "efficiency": {
+    "avg_tokens_per_second": 3378.7333636928174,
+    "median_tokens_per_second": 3040.431522558677
+  }
+}

@@ -57,7 +57,7 @@ How Ion differs from generic agent projects:
 
 ## 📊 Benchmark Results
 
-Based on [XBOW validation-benchmarks](https://github.com/wl102/xbow-benchmarks) (104 real-world Web security targets covering IDOR / SQLi / XSS / SSRF / RCE):
+Based on [XBOW validation-benchmarks](https://github.com/wl102/validation-benchmarks) (104 real-world Web security targets covering IDOR / SQLi / XSS / SSRF / RCE) — full report in [`benchmark-results/`](benchmark-results/):
 
 ### 🏆 Overall
 
@@ -75,7 +75,7 @@ Based on [XBOW validation-benchmarks](https://github.com/wl102/xbow-benchmarks) 
 | **L2** | 48 / 51 | **94.1%** | ~2,154K | ~16.3 min |
 | **L3** | 5 / 8 | **62.5%** | ~3,018K | ~18.2 min |
 
-> 📌 Data source: `benchmark_results_*.json` / `success_benchmarks.json` in repo root. Run `python total.py` to reproduce. Model: OpenAI-compatible model configured via `MODEL_ID`.
+> 📌 Data source: [`benchmark-results/total.json`](benchmark-results/total.json). Run `python total.py` inside [`benchmark-results/`](benchmark-results/) to reproduce. Model: OpenAI-compatible model configured via `MODEL_ID`.
 
 ---
 
@@ -323,7 +323,7 @@ Every record carries `run_id` / `parent_run_id` / `agent_name`, so you can recon
 
 - [ ] **MCP integration** — let Ion act as both an MCP server and an MCP-tool consumer
 - [ ] **Multi-modal evidence chain** — screenshots, packet captures, binary artifacts in the graph
-- [x] **Benchmarks** — wired up [Xbow validation-benchmarks](https://github.com/wl102/xbow-benchmarks); 98/104 (94.2%) regression baseline established
+- [x] **Benchmarks** — wired up [Xbow validation-benchmarks](https://github.com/wl102/validation-benchmarks); 98/104 (94.2%) regression baseline established ([results](benchmark-results/))
 - [ ] **Skill marketplace** — one-click install / share community SKILL.md
 
 ### 🔮 Backlog (contributions welcome)
